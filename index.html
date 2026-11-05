@@ -1572,12 +1572,12 @@ async function enablePush() {
 /* ---------- entrada (código por correo) ---------- */
 function viewLogin(err) {
   document.getElementById('root').innerHTML = `<div style="min-height:100%;display:grid;place-items:center;padding:24px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))"><div class="card" style="width:min(420px,100%);display:flex;flex-direction:column;gap:14px;padding:24px">
-    <div class="brand" style="padding:0">${logo()}<div><b>RF App</b><small>Rompiendo Fortalezas</small></div></div><h1 style="font-size:26px">Entra con tu correo</h1><p class="hint" style="margin:0" id="lMsg">Te mandamos un correo con un enlace para entrar. No necesitas contraseña.</p>
+    <div class="brand" style="padding:0">${logo()}<div><b>RF App</b><small>Rompiendo Fortalezas</small></div></div><h1 style="font-size:26px">Entra con tu correo</h1><p class="hint" style="margin:0" id="lMsg">Te mandamos un código a tu correo. Lo escribes aquí y listo, sin contraseña.</p>
     <div class="field"><label for="lE">Correo</label><input class="in" id="lE" type="email" autocomplete="email" inputmode="email"></div>
-    <div class="field" id="lCW" hidden><label for="lC">¿El correo trae un código de 6 números? Escríbelo aquí</label><input class="in" id="lC" inputmode="numeric" autocomplete="one-time-code" maxlength="6" style="font-family:var(--num);font-size:24px;letter-spacing:.3em"></div>
-    ${err ? `<p class="hint" style="color:var(--bad)">${esc(err)}</p>` : ''}<button class="btn primary" id="lGo">Enviarme el enlace</button></div></div>`;
+    <div class="field" id="lCW" hidden><label for="lC">Código del correo</label><input class="in" id="lC" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="••••••" style="font-family:var(--num);font-size:28px;letter-spacing:.35em;text-align:center"></div>
+    ${err ? `<p class="hint" style="color:var(--bad)">${esc(err)}</p>` : ''}<button class="btn primary" id="lGo">Enviarme el código</button></div></div>`;
   let sent = false;
-  $('#lGo').onclick = async () => { const e = $('#lE').value.trim().toLowerCase(); try { if (!sent) { await DB.sendCode(e); sent = true; $('#lCW').hidden = false; $('#lGo').textContent = 'Entrar con el código'; $('#lMsg').innerHTML = '<b>Listo, revisa tu correo</b> (y la carpeta de spam). Toca el enlace desde este mismo teléfono y entras directo.'; } else { await DB.verify(e, $('#lC').value.trim()); location.reload(); } } catch (x) { toast(x.message, 5000); } };
+  $('#lGo').onclick = async () => { const e = $('#lE').value.trim().toLowerCase(); try { if (!sent) { await DB.sendCode(e); sent = true; $('#lCW').hidden = false; $('#lGo').textContent = 'Entrar'; $('#lMsg').innerHTML = '<b>Revisa tu correo</b> (y la carpeta de spam). Te llegó un código de <b>app@rfortalezas.com</b>: cópialo y pégalo aquí.'; $('#lC').focus(); $('#lC').oninput = e => { const v = e.target.value.replace(/\D/g, ''); e.target.value = v; if (v.length >= 6 && !e.target.dataset.go) { e.target.dataset.go = 1; setTimeout(() => $('#lGo').click(), 150); } }; } else { await DB.verify(e, $('#lC').value.trim()); location.reload(); } } catch (x) { toast(x.message, 5000); } };
 }
 
 (async function start() {
