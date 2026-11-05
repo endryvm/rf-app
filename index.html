@@ -588,6 +588,7 @@ body::after{content:"";position:fixed;inset:-10%;z-index:-1;pointer-events:none;
 .mxauto{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);width:100%}
 @media (orientation:landscape) and (max-height:520px){.mxnet:not(.on){display:none}}
 .mxnet a{text-decoration:none}
+.mxip{width:150px;flex:0 0 auto;padding:8px 10px;font-variant-numeric:tabular-nums}
 
 </style>
 <div id="root"></div>
@@ -876,6 +877,95 @@ const MixLive = sb => ({
   set(o) { this.ch && this.ch.send({ type: 'broadcast', event: 'set', payload: o }); },
 });
 
+/* ---------- app nativa (Android / iPhone): el teléfono le habla DIRECTO a la X32 por su IP, como la app de Behringer ----------
+   Sin internet y sin la computadora de Playback en el medio. Solo existe dentro de la app instalada (no en el navegador). */
+const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const UDP = NATIVE && window.Capacitor.Plugins ? window.Capacitor.Plugins.RFUdp : null;
+const x32Ip = () => { try { return localStorage.getItem('rf-x32-ip') || ''; } catch (e) { return ''; } };
+const x32SetIp = v => { try { localStorage.setItem('rf-x32-ip', v); } catch (e) {} };
+const OSC = {
+  te: new TextEncoder(), td: new TextDecoder(),
+  str(s) { const b = this.te.encode(s); const n = (b.length + 4) & ~3; const o = new Uint8Array(n); o.set(b); return o; },
+  // args: números enteros como ['i',1], decimales como ['f',.5], textos como 's'
+  enc(addr, args = []) {
+    let types = ','; const parts = [];
+    for (const a of args) {
+      if (typeof a === 'string') { types += 's'; parts.push(this.str(a)); }
+      else { types += a[0]; const b = new Uint8Array(4), dv = new DataView(b.buffer); if (a[0] === 'i') dv.setInt32(0, a[1]); else dv.setFloat32(0, a[1]); parts.push(b); }
+    }
+    const all = [this.str(addr), this.str(types), ...parts], out = new Uint8Array(all.reduce((n, x) => n + x.length, 0)); let o = 0; all.forEach(x => { out.set(x, o); o += x.length; }); return out;
+  },
+  dec(b) {
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength); let o = 0;
+    const str = () => { let e = b.indexOf(0, o); if (e < 0) e = b.length; const s = this.td.decode(b.subarray(o, e)); o = (e + 4) & ~3; return s; };
+    const addr = str(); if (o >= b.length) return { addr, args: [] };
+    const types = str(), args = [];
+    for (const t of types.slice(1)) { if (o + 4 > b.length) break; if (t === 'i') { args.push(dv.getInt32(o)); o += 4; } else if (t === 'f') { args.push(dv.getFloat32(o)); o += 4; } else if (t === 's') args.push(str()); else if (t === 'b') { const n = dv.getInt32(o); o += 4 + ((n + 3) & ~3); } }
+    return { addr, args };
+  },
+  b64(u) { let s = ''; for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s); },
+  unb64(s) { const r = atob(s), u = new Uint8Array(r.length); for (let i = 0; i < r.length; i++) u[i] = r.charCodeAt(i); return u; },
+};
+const two2 = n => String(n).padStart(2, '0');
+const MixDirect = {
+  kind: 'direct', ip: '', st: null, timers: [], lis: null,
+  send(addr, args) { if (UDP && this.ip) UDP.send({ ip: this.ip, port: 10023, data: OSC.b64(OSC.enc(addr, args)) }).catch(() => {}); },
+  snap(bus) {
+    const st = this.st;
+    return { status: { connected: st.connected, info: st.info, direct: true, ip: this.ip }, cap: .75, inputs: st.inputs.map(x => ({ id: x.id, num: x.num, kind: x.kind, name: x.name, color: MIXCOL[(x.color || 0) % 8], on: x.on })),
+      buses: st.buses.map(b => ({ n: b.n, name: b.name || 'Bus ' + b.n, fader: b.fader, on: b.on })), sends: Object.fromEntries(st.inputs.map(x => [x.id, st.sends[x.id + '|' + bus] || { level: 0, on: 1 }])) };
+  },
+  scan(bus, full) {
+    const q = [];
+    this.st.inputs.forEach(x => q.push(`/${x.id}/config/name`, `/${x.id}/config/color`, `/${x.id}/mix/on`));
+    this.st.buses.forEach(b => q.push(`/bus/${two2(b.n)}/config/name`, `/bus/${two2(b.n)}/mix/fader`, `/bus/${two2(b.n)}/mix/on`));
+    if (full && bus) this.st.inputs.forEach(x => q.push(`/${x.id}/mix/${two2(bus)}/level`, `/${x.id}/mix/${two2(bus)}/on`));
+    let i = 0; const step = () => { for (let k = 0; k < 24 && i < q.length; k++) this.send(q[i++]); if (i < q.length) setTimeout(step, 15); }; step();
+  },
+  open(bus, onSnap, onEv, onFail) {
+    this.ip = x32Ip();
+    const ins = [...Array.from({ length: 32 }, (_, i) => ({ id: 'ch/' + two2(i + 1), num: i + 1, kind: 'Canal' })), ...Array.from({ length: 8 }, (_, i) => ({ id: 'auxin/' + two2(i + 1), num: i + 1, kind: 'Aux' }))];
+    const st = this.st = { connected: false, lastRx: 0, info: null, inputs: ins.map(x => ({ ...x, name: '', color: 0, on: 1 })), buses: Array.from({ length: 16 }, (_, i) => ({ n: i + 1, name: '', fader: 0, on: 1 })), sends: {} };
+    let first = true, sT = 0; const ev = e => { if (!first && onEv) onEv(e); };
+    const inp = id => st.inputs.find(x => x.id === id);
+    const onMsg = d => {
+      let m; try { m = OSC.dec(OSC.unb64(d.data)); } catch (e) { return; }
+      st.lastRx = Date.now(); if (!st.connected) { st.connected = true; ev({ t: 'status', ...this.snap(bus).status }); }
+      const a = m.addr, v = m.args[0]; let r;
+      if (a === '/xinfo' || a === '/info') { st.info = { ip: m.args[0], name: m.args[1], model: m.args[2], fw: m.args[3] }; if (first) { clearTimeout(sT); sT = setTimeout(() => { first = false; onSnap(this.snap(bus)); }, 900); } return; }
+      if ((r = /^\/(ch|auxin)\/(\d\d)\/config\/name$/.exec(a))) { const x = inp(r[1] + '/' + r[2]); if (x && x.name !== v) { x.name = v; ev({ t: 'input', id: x.id, name: v }); } return; }
+      if ((r = /^\/(ch|auxin)\/(\d\d)\/config\/color$/.exec(a))) { const x = inp(r[1] + '/' + r[2]); if (x) { x.color = v; ev({ t: 'input', id: x.id, color: v }); } return; }
+      if ((r = /^\/(ch|auxin)\/(\d\d)\/mix\/on$/.exec(a))) { const x = inp(r[1] + '/' + r[2]); if (x) x.on = v; return; }
+      if ((r = /^\/(ch|auxin)\/(\d\d)\/mix\/(\d\d)\/(level|on)$/.exec(a))) { const k = r[1] + '/' + r[2] + '|' + +r[3]; const s = st.sends[k] || (st.sends[k] = { level: 0, on: 1 }); s[r[4]] = v; ev({ t: 'send', id: r[1] + '/' + r[2], bus: +r[3], [r[4]]: v }); return; }
+      if ((r = /^\/bus\/(\d\d)\/config\/name$/.exec(a))) { const b = st.buses[+r[1] - 1]; if (b && b.name !== v) { b.name = v; ev({ t: 'bus', n: b.n, name: v }); } return; }
+      if ((r = /^\/bus\/(\d\d)\/mix\/(fader|on)$/.exec(a))) { const b = st.buses[+r[1] - 1]; if (b) { b[r[2]] = v; ev({ t: 'bus', n: b.n, [r[2]]: v }); } return; }
+    };
+    UDP.addListener('msg', onMsg).then(h => { this.lis = h; });
+    UDP.open().then(() => { this.send('/xinfo'); this.send('/xremote'); this.scan(bus, true); }).catch(() => onFail && onFail());
+    // si la consola no contesta en 4 s, se sigue por la nube (RF Playback)
+    const failT = setTimeout(() => { if (!st.connected && onFail) onFail(); }, 4000);
+    // /xremote: la consola avisa de todo cambio por 10 s; se renueva. Nombres y colores se releen cada 20 s.
+    this.timers = [failT, setInterval(() => { this.send('/xremote'); if (!st.connected) this.send('/xinfo'); else if (Date.now() - st.lastRx > 12000) { st.connected = false; ev({ t: 'status', ...this.snap(bus).status }); } }, 8000), setInterval(() => this.scan(bus, false), 20000)];
+    return () => { this.timers.forEach(t => { clearTimeout(t); clearInterval(t); }); this.timers = []; if (this.lis) this.lis.remove(); this.lis = null; };
+  },
+  set(o) {
+    const n = +o.bus, cap = .75; if (!n || !this.st) return;
+    if (o.master != null) { const f = Math.max(0, Math.min(cap, +o.master)); this.st.buses[n - 1].fader = f; this.send(`/bus/${two2(n)}/mix/fader`, [['f', f]]); return; }
+    const k = o.id + '|' + n, s = this.st.sends[k] || (this.st.sends[k] = { level: 0, on: 1 });
+    if (o.level != null) { s.level = Math.max(0, Math.min(cap, +o.level)); this.send(`/${o.id}/mix/${two2(n)}/level`, [['f', s.level]]); }
+    if (o.on != null) { s.on = o.on ? 1 : 0; this.send(`/${o.id}/mix/${two2(n)}/on`, [['i', s.on]]); }
+  },
+  // busca la consola en el WiFi: pregunta a todos y la X32 contesta con su IP
+  find() {
+    return new Promise(res => {
+      let h = null, done = false; const end = ip => { if (done) return; done = true; if (h) h.remove(); res(ip); };
+      UDP.addListener('msg', d => { try { const m = OSC.dec(OSC.unb64(d.data)); if (m.addr === '/xinfo' || m.addr === '/info') end(d.ip); } catch (e) {} }).then(x => { h = x; if (done) x.remove(); });
+      UDP.open().then(() => { const b = OSC.b64(OSC.enc('/xinfo')); [0, 400, 900].forEach(t => setTimeout(() => UDP.send({ ip: '255.255.255.255', port: 10023, data: b }).catch(() => {}), t)); }).catch(() => end(''));
+      setTimeout(() => end(''), 2500);
+    });
+  },
+};
+
 const MIX = { api: null, close: null, S: null, bus: 0, drag: new Set(), all: false, pend: new Map(), t: 0 };
 const mixGroups = () => { try { return JSON.parse(localStorage.getItem('rf-mix-groups-' + MIX.bus) || '[]'); } catch (e) { return []; } };
 const mixSetGroups = g => { try { localStorage.setItem('rf-mix-groups-' + MIX.bus, JSON.stringify(g)); } catch (e) {} };
@@ -885,11 +975,29 @@ function mixStop() { if (MIX.close) MIX.close(); MIX.close = null; }
 function mixStart() {
   const myBus = +(me().mix_bus || 0);
   if (!MIX.bus) MIX.bus = myBus || 0;
-  if (!MIX.api) MIX.api = DB.mode === 'demo' ? MixDemo : MixLive(DB.client());
+  // en la app instalada con la IP de la consola puesta: directo a la X32; si no responde, por la nube
+  if (!MIX.api) MIX.api = DB.mode === 'demo' ? MixDemo : (UDP && x32Ip() && !MIX.noDirect) ? MixDirect : MixLive(DB.client());
   mixStop();
   if (!MIX.bus) return;
-  mixNetCheck();
-  MIX.close = MIX.api.open(MIX.bus, snap => { const first = !MIX.S; MIX.S = snap; if (snap.net) mixNetSet(snap.net); if (first && ST.tab === 'mix' && !ST.view) { render(); return; } const m = $('#mixBody'); if (m) m.innerHTML = mixBodyHtml(); mixBind(); }, ev => mixEvent(ev));
+  if (MIX.api.kind !== 'direct') mixNetCheck();
+  const onSnap = snap => { const first = !MIX.S; MIX.S = snap; if (snap.net) mixNetSet(snap.net); if (first && ST.tab === 'mix' && !ST.view) { render(); return; } const m = $('#mixBody'); if (m) m.innerHTML = mixBodyHtml(); mixBind(); };
+  const onFail = () => { if (MIX.api !== MixDirect || MIX.S) return; mixStop(); MIX.noDirect = true; MIX.api = MixLive(DB.client()); toast('La consola no respondió en este WiFi. Seguimos por internet con RF Playback.'); mixStart(); render(); };
+  MIX.close = MIX.api.open(MIX.bus, onSnap, ev => mixEvent(ev), onFail);
+}
+// cambiar o buscar la IP de la consola (solo en la app instalada)
+function mixDirectReset() { mixStop(); MIX.api = null; MIX.S = null; MIX.noDirect = false; mixStart(); render(); }
+function mixConsoleHtml() {
+  if (!UDP || DB.mode === 'demo') return '';
+  const ip = x32Ip(), on = MIX.api && MIX.api.kind === 'direct';
+  return `<div class="mxnet${on && MIX.S && MIX.S.status.connected ? ' on' : ''}" id="mixCon"><div><b>${ic('wifi')} ${on ? (MIX.S && MIX.S.status.connected ? 'Conectado directo a la consola' : 'Buscando la consola…') : ip ? 'Por internet (RF Playback)' : 'Conecta tu teléfono a la consola'}</b>
+    <small>${ip ? 'X32 en ' + esc(ip) + (on ? '' : ' · conéctate a su WiFi y toca Reintentar') : 'Conéctate al WiFi de la consola y toca Buscar, o escribe su IP.'}</small></div>
+    <input class="in mxip" id="mixIp" inputmode="decimal" placeholder="192.168.0.50" value="${esc(ip)}" aria-label="IP de la consola">
+    <button class="btn small" id="mixFind">Buscar</button><button class="btn small primary" id="mixIpGo">${on ? 'Guardar' : ip ? 'Reintentar' : 'Conectar'}</button></div>`;
+}
+function mixConsoleBind() {
+  const go = $('#mixIpGo'); if (!go) return;
+  go.onclick = () => { const v = $('#mixIp').value.trim(); if (v && !/^\d{1,3}(\.\d{1,3}){3}$/.test(v)) return toast('Esa IP no se ve bien. Es algo como 192.168.0.50'); x32SetIp(v); mixDirectReset(); };
+  $('#mixFind').onclick = async () => { const b = $('#mixFind'); b.disabled = true; b.textContent = 'Buscando…'; const ip = await MixDirect.find(); if (ip) { x32SetIp(ip); toast('Consola encontrada en ' + ip); mixDirectReset(); } else { b.disabled = false; b.textContent = 'Buscar'; toast('No apareció la consola. Revisa que estés en su WiFi, o escribe la IP a mano.', 5000); } };
 }
 function mixEvent(ev) {
   const S = MIX.S; if (!S) return;
@@ -929,7 +1037,7 @@ function viewMix() {
   const pick = myBus && !dir ? `<span class="mxbus">${ic('mix')}${esc(cur ? cur.name : 'Bus ' + myBus)}</span>`
     : `<select class="in mxsel" id="mixBus" aria-label="${dir ? 'Mezcla que estás viendo' : '¿Cuál es tu mezcla?'}"><option value="0">${dir ? 'Elige la mezcla' : '¿Cuál es tu mezcla?'}</option>${busOpts.map(b => `<option value="${b.n}"${b.n === MIX.bus ? ' selected' : ''}>${esc(b.name)}</option>`).join('')}</select>`;
   return `<div class="wrap mixv">${demoBar()}${topBar('Escenario', 'In-ears · consola X32', S ? `<span class="pill ${S.status && S.status.connected ? 'ok' : 'bad'}">${S.status && S.status.connected ? 'Consola conectada' : 'Sin consola'}</span>` : '')}${stageSeg()}
-    ${mixNetHtml()}
+    ${UDP ? mixConsoleHtml() : mixNetHtml()}
     <div class="mxctl">${pick}${S && MIX.bus ? `<button class="btn small" data-mxg="-1">${ic('plus')}Grupo</button><button class="btn small ghost" data-mxall>${MIX.all ? 'Con nombre' : 'Ver todos'}</button>` : ''}</div>
     <div id="mixBody">${mixBodyHtml()}</div>
     ${!myBus && !dir ? '<p class="hint">Pídele al director que te asigne tu mezcla en tu ficha del equipo, así abre directo.</p>' : ''}
@@ -948,8 +1056,8 @@ function fdStrip(o) {
 }
 function mixBodyHtml() {
   const S = MIX.S; if (!MIX.bus) return '<div class="empty">Elige arriba tu mezcla de in-ears.</div>';
-  if (!S) return `<div class="empty">Buscando la consola… ${DB.mode === 'demo' ? '' : 'RF Playback tiene que estar abierto en la computadora del sonido, conectado a la X32.'}</div>`;
-  const b = (S.buses || []).find(x => x.n === MIX.bus); if (!b) return '<div class="empty">Esa mezcla no está habilitada en RF Playback.</div>';
+  if (!S) return `<div class="empty">Buscando la consola… ${DB.mode === 'demo' ? '' : MIX.api && MIX.api.kind === 'direct' ? 'Tu teléfono tiene que estar en el WiFi de la consola.' : 'RF Playback tiene que estar abierto en la computadora del sonido, conectado a la X32.'}</div>`;
+  const b = (S.buses || []).find(x => x.n === MIX.bus); if (!b) return `<div class="empty">${MIX.api && MIX.api.kind === 'direct' ? 'Esa mezcla no existe en la consola.' : 'Esa mezcla no está habilitada en RF Playback.'}</div>`;
   const G = mixGroups(), cap = S.cap || .75;
   const vis = S.inputs.filter(x => MIX.all || x.name || ((S.sends[x.id] || {}).level > 0));
   let h = `<div class="console" id="mxCon">`;
@@ -977,7 +1085,7 @@ function fdBind(el, get, set, end) {
 function mixBind() {
   const S = MIX.S;
   const bs = $('#mixBus'); if (bs) bs.onchange = e => { MIX.bus = +e.target.value; MIX.S = null; render(); };
-  mixNetBind();
+  mixNetBind(); mixConsoleBind();
   if (!S) return;
   const rel = ids => setTimeout(() => ids.forEach(i => MIX.drag.delete(i)), 300);
   document.querySelectorAll('.fd[data-f]').forEach(el => { const id = el.dataset.f;
@@ -1306,7 +1414,8 @@ function liveStep() {
 let installEvt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (ST.tab === 'me') render(); });
 window.addEventListener('appinstalled', () => { installEvt = null; toast('¡Listo! RF App ya está en tu pantalla de inicio.'); if (ST.tab === 'me') render(); });
-const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isNativeApp = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const isStandalone = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 function installCard() {
   if (isStandalone()) return `<section class="card inst"><img src="${LOGO}" alt=""><div class="tx"><b>RF App está instalada</b><small>La abres desde el ícono en tu pantalla de inicio.</small></div><span class="pill ok">${ic('check')}Lista</span></section>`;
@@ -1684,7 +1793,7 @@ function viewLogin(err) {
   const h = (location.hash || '').slice(1); if (TABS.some(t => t[0] === h) || h === 'me') ST.tab = h; else if (h === 'mix' || h === 'live') { ST.tab = h; ST.stage = h; }
   await reload(); syncThemeColor(); if (ST.tab === 'mix') mixStart();
   try { matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (!document.documentElement.dataset.theme) setTheme(''); }); } catch (e) {}
-  if ('serviceWorker' in navigator && location.protocol === 'https:' && window.RF_CFG) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol === 'https:' && window.RF_CFG && !isNativeApp()) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
 
 </script>
