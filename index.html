@@ -580,6 +580,15 @@ body::after{content:"";position:fixed;inset:-10%;z-index:-1;pointer-events:none;
 .logo.lg{width:76px;height:76px;border-radius:20px}
 .gd{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;background:var(--card2);color:var(--blue);flex:none}.gd svg{width:26px;height:26px}
 
+/* mezcla rápida por el WiFi del sonido */
+.mxnet{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:16px;background:var(--glass,var(--card));border:1px solid var(--gline,var(--line))}
+.mxnet>div{flex:1;min-width:180px;display:flex;flex-direction:column;gap:2px}.mxnet small{color:var(--muted);font-size:12.5px;flex:1}
+.mxnet b{display:flex;align-items:center;gap:6px;font-size:14px}.mxnet b svg{width:16px;height:16px;color:var(--gold)}
+.mxnet.on{border-color:color-mix(in srgb,var(--gold) 45%,transparent)}
+.mxauto{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);width:100%}
+@media (orientation:landscape) and (max-height:520px){.mxnet:not(.on){display:none}}
+.mxnet a{text-decoration:none}
+
 </style>
 <div id="root"></div>
 <script>
@@ -879,13 +888,39 @@ function mixStart() {
   if (!MIX.api) MIX.api = DB.mode === 'demo' ? MixDemo : MixLive(DB.client());
   mixStop();
   if (!MIX.bus) return;
-  MIX.close = MIX.api.open(MIX.bus, snap => { const first = !MIX.S; MIX.S = snap; if (first && ST.tab === 'mix' && !ST.view) { render(); return; } const m = $('#mixBody'); if (m) m.innerHTML = mixBodyHtml(); mixBind(); }, ev => mixEvent(ev));
+  mixNetCheck();
+  MIX.close = MIX.api.open(MIX.bus, snap => { const first = !MIX.S; MIX.S = snap; if (snap.net) mixNetSet(snap.net); if (first && ST.tab === 'mix' && !ST.view) { render(); return; } const m = $('#mixBody'); if (m) m.innerHTML = mixBodyHtml(); mixBind(); }, ev => mixEvent(ev));
 }
 function mixEvent(ev) {
   const S = MIX.S; if (!S) return;
   if (ev.t === 'send' && ev.bus === MIX.bus && !MIX.drag.has(ev.id)) { const s = S.sends[ev.id] = S.sends[ev.id] || { level: 0, on: 1 }; if (ev.level != null) s.level = ev.level; if (ev.on != null) s.on = ev.on; const r = document.querySelector(`.fd[data-f="${CSS.escape(ev.id)}"]`); if (r && ev.level != null) fdShow(r, ev.level); if (r && ev.on != null) { const st = r.closest('.strip'), bt = st.querySelector('[data-mxon]'); st.classList.toggle('muted', !ev.on); if (bt) { bt.textContent = ev.on ? 'ON' : 'MUTE'; bt.classList.toggle('off', !ev.on); } } }
   if (ev.t === 'input' || ev.t === 'bus' || ev.t === 'status') { const x = ev.t === 'input' && S.inputs.find(i => i.id === ev.id); if (x) { if (ev.name != null) x.name = ev.name; if (ev.color != null) x.color = MIXCOL[ev.color % 8]; } if (ev.t === 'status') S.status = ev; clearTimeout(MIX.rt); MIX.rt = setTimeout(() => { const m = $('#mixBody'); if (m) { m.innerHTML = mixBodyHtml(); mixBind(); } }, 150); }
 }
+
+/* ---------- camino rápido: si el teléfono está en el WiFi del sonido, la mezcla va directo a la computadora (sin internet) ----------
+   RF Playback manda sus direcciones locales y la IP pública de la iglesia; la app pregunta la suya y compara. */
+const sameNet = (a, b) => { if (!a || !b) return false; if (a.includes(':') && b.includes(':')) return a.split(':').slice(0, 4).join(':') === b.split(':').slice(0, 4).join(':'); return a === b; };
+const mixLocalOn = () => { try { return localStorage.getItem('rf-mix-local') !== 'no'; } catch (e) { return true; } };
+function mixLocalUrl() { const l = MIX.net && MIX.net.lan && MIX.net.lan[0]; return l ? `${l}/mezcla?bus=${MIX.bus || 0}&back=${encodeURIComponent(location.origin + location.pathname + '#mix')}` : ''; }
+function mixNetCheck() {
+  if (DB.mode === 'demo' || MIX.myip !== undefined) return; MIX.myip = '';
+  DB.drive('ip').then(d => { MIX.myip = (d && d.ip) || ''; mixNetUpd(); }).catch(() => {});
+}
+function mixNetSet(n) { const was = JSON.stringify(MIX.net || null); MIX.net = n; if (JSON.stringify(n) !== was) mixNetUpd(); }
+function mixNetUpd() {
+  MIX.local = !!(MIX.net && MIX.net.lan && MIX.net.lan.length && sameNet(MIX.myip, MIX.net.ip));
+  const c = $('#mixNet'); if (c) { c.outerHTML = mixNetHtml(); mixNetBind(); }
+  // abre solito una vez por sesión, si el músico no lo apagó
+  let done = false; try { done = sessionStorage.getItem('rf-mix-auto') === '1'; } catch (e) {}
+  if (MIX.local && MIX.bus && mixLocalOn() && !done && ST.tab === 'mix' && !ST.view && !document.hidden) { try { sessionStorage.setItem('rf-mix-auto', '1'); } catch (e) {} location.href = mixLocalUrl(); }
+}
+function mixNetHtml() {
+  const u = mixLocalUrl(); if (!u || DB.mode === 'demo') return '<div id="mixNet" hidden></div>';
+  if (MIX.local) return `<div id="mixNet" class="mxnet on"><div><b>${ic('wifi')} Estás en el WiFi del sonido</b><small>Mezcla rápida: va directo a la computadora, sin internet.</small></div>
+    <a class="btn small primary" href="${esc(u)}">Abrir</a><label class="mxauto"><input type="checkbox" id="mixAuto"${mixLocalOn() ? ' checked' : ''}> Abrir directo</label></div>`;
+  return `<div id="mixNet" class="mxnet"><small>¿Estás conectado al WiFi del sonido? La mezcla rápida responde al instante.</small><a class="btn small ghost" href="${esc(u)}">Mezcla rápida</a></div>`;
+}
+function mixNetBind() { const a = $('#mixAuto'); if (a) a.onchange = () => { try { localStorage.setItem('rf-mix-local', a.checked ? 'si' : 'no'); } catch (e) {} }; }
 
 function viewMix() {
   const S = MIX.S, dir = isDir(), myBus = +(me().mix_bus || 0);
@@ -894,6 +929,7 @@ function viewMix() {
   const pick = myBus && !dir ? `<span class="mxbus">${ic('mix')}${esc(cur ? cur.name : 'Bus ' + myBus)}</span>`
     : `<select class="in mxsel" id="mixBus" aria-label="${dir ? 'Mezcla que estás viendo' : '¿Cuál es tu mezcla?'}"><option value="0">${dir ? 'Elige la mezcla' : '¿Cuál es tu mezcla?'}</option>${busOpts.map(b => `<option value="${b.n}"${b.n === MIX.bus ? ' selected' : ''}>${esc(b.name)}</option>`).join('')}</select>`;
   return `<div class="wrap mixv">${demoBar()}${topBar('Escenario', 'In-ears · consola X32', S ? `<span class="pill ${S.status && S.status.connected ? 'ok' : 'bad'}">${S.status && S.status.connected ? 'Consola conectada' : 'Sin consola'}</span>` : '')}${stageSeg()}
+    ${mixNetHtml()}
     <div class="mxctl">${pick}${S && MIX.bus ? `<button class="btn small" data-mxg="-1">${ic('plus')}Grupo</button><button class="btn small ghost" data-mxall>${MIX.all ? 'Con nombre' : 'Ver todos'}</button>` : ''}</div>
     <div id="mixBody">${mixBodyHtml()}</div>
     ${!myBus && !dir ? '<p class="hint">Pídele al director que te asigne tu mezcla en tu ficha del equipo, así abre directo.</p>' : ''}
@@ -941,6 +977,7 @@ function fdBind(el, get, set, end) {
 function mixBind() {
   const S = MIX.S;
   const bs = $('#mixBus'); if (bs) bs.onchange = e => { MIX.bus = +e.target.value; MIX.S = null; render(); };
+  mixNetBind();
   if (!S) return;
   const rel = ids => setTimeout(() => ids.forEach(i => MIX.drag.delete(i)), 300);
   document.querySelectorAll('.fd[data-f]').forEach(el => { const id = el.dataset.f;
@@ -983,6 +1020,7 @@ const I = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', up: '<path d="m6 15 6-6 6 6"/>', down: '<path d="m6 9 6 6 6-6"/>', back: '<path d="M15 5 8 12l7 7"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>', gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   mix: '<path d="M5 3v18M12 3v18M19 3v18"/><rect x="3" y="13" width="4" height="4" rx="1" fill="currentColor"/><rect x="10" y="6" width="4" height="4" rx="1" fill="currentColor"/><rect x="17" y="10" width="4" height="4" rx="1" fill="currentColor"/>',
+  wifi: '<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.6 16a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19.3" r="1.1" fill="currentColor" stroke="none"/>',
   wave: '<path d="M7 11V6.5a1.5 1.5 0 0 1 3 0V11M10 10V4.5a1.5 1.5 0 0 1 3 0V10M13 10V5.5a1.5 1.5 0 0 1 3 0V12M16 9.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-.5A6.5 6.5 0 0 1 6 17.5L4 13.5a1.5 1.5 0 0 1 2.6-1.5L7 13"/>',
   pray: '<path d="M12 21c-4-3-7-6.5-7-10a7 7 0 0 1 14 0c0 3.5-3 7-7 10z"/><path d="M12 7v7M9.5 9.5h5"/>', video: '<rect x="3" y="6" width="13" height="12" rx="2.5"/><path d="m16 10 5-3v10l-5-3z"/>',
   mega: '<path d="M3 10v4h3l7 4V6L6 10z"/><path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11"/>', star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
@@ -1643,7 +1681,7 @@ function viewLogin(err) {
   if (cfg && cfg.url && window.supabase) { DB = SupaDB(cfg); try { const ok = await DB.init(); if (!ok) { viewLogin(); return; } if (!DB.me()) { viewLogin('Ese correo no está en el equipo. Pídele al director que te invite.'); await DB.signOut(); return; } } catch (e) { viewLogin(e.message); return; } }
   else await DB.init();
   DB.onChange(() => reload());
-  const h = (location.hash || '').slice(1); if (TABS.some(t => t[0] === h) || h === 'me') ST.tab = h;
+  const h = (location.hash || '').slice(1); if (TABS.some(t => t[0] === h) || h === 'me') ST.tab = h; else if (h === 'mix' || h === 'live') { ST.tab = h; ST.stage = h; }
   await reload(); syncThemeColor(); if (ST.tab === 'mix') mixStart();
   try { matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (!document.documentElement.dataset.theme) setTheme(''); }); } catch (e) {}
   if ('serviceWorker' in navigator && location.protocol === 'https:' && window.RF_CFG) navigator.serviceWorker.register('sw.js').catch(() => {});
