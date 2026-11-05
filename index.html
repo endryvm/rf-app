@@ -573,6 +573,12 @@ body::after{content:"";position:fixed;inset:-10%;z-index:-1;pointer-events:none;
 :root[data-theme="light"] .seg button.on{background:#fff}
 @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .seg button.on{background:#fff}}
 
+.login{min-height:100dvh;display:grid;place-items:center;padding:24px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))}
+.lcard{width:min(420px,100%);display:flex;flex-direction:column;gap:14px;padding:26px}
+.lhead{display:flex;flex-direction:column;align-items:center;gap:6px;margin-bottom:4px}
+.lhead h1{font-size:28px}.lhead .hint{margin:0}
+.logo.lg{width:76px;height:76px;border-radius:20px}
+
 </style>
 <div id="root"></div>
 <script>
@@ -787,6 +793,8 @@ const SupaDB = (cfg) => {
       return true;
     },
     async sendCode(email) { await q(sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } })); },
+    async signInPw(email, password) { const { error } = await sb.auth.signInWithPassword({ email, password }); if (error) throw new Error(/invalid/i.test(error.message) ? 'Correo o contraseña incorrectos. Si todavía no creaste tu contraseña, entra con código.' : error.message); },
+    async setPassword(password) { await q(sb.auth.updateUser({ password })); },
     async verify(email, token) { await q(sb.auth.verifyOtp({ email, token, type: 'email' })); },
     async signOut() { await sb.auth.signOut(); },
     me() { return meRow; },
@@ -1323,6 +1331,8 @@ function viewMe() {
       <div class="field"><label>Lo que tocas o cantas</label><div class="links" id="pRoles">${ROLES.map(r => `<button class="pill${(m.roles || []).includes(r) ? ' gold' : ''}" data-role="${esc(r)}" type="button">${esc(r)}</button>`).join('')}</div></div>
       <div><button class="btn primary" data-act="saveme">Guardar</button></div></section>
     ${installCard()}
+    ${DB.mode === 'demo' ? '' : `<section class="card"><div class="sechead"><h3>Tu contraseña</h3></div><p class="hint" style="margin:6px 0 12px">Créala para entrar con correo y contraseña, sin esperar el código. Mínimo 8 caracteres.</p>
+      <div class="links"><input class="in" id="pPw" type="password" autocomplete="new-password" placeholder="Nueva contraseña" style="flex:1;min-width:180px"><button class="btn primary" data-act="setpw">Guardar contraseña</button></div></section>`}
     <section class="card"><div class="sechead"><h3>Recordatorios</h3></div><p class="hint" style="margin:8px 0 12px">Te avisamos los lunes si te toca elegir canciones, y un día antes de cada ensayo.</p>
       <div class="links"><button class="btn" data-act="push">${ic('bell')}Activar notificaciones en este teléfono</button></div><p class="hint">En iPhone primero agrega la app a la pantalla de inicio (Compartir → Agregar a inicio).</p></section>
     <section class="card"><div class="sechead"><h3>Apariencia</h3></div><p class="hint" style="margin:6px 0 10px">De día se lee mejor la clara; en el templo con poca luz, la oscura. «Automática» sigue al teléfono.</p><div class="seg"><button data-theme-set="" class="${th === '' ? 'on' : ''}">${ic('gear')} Automática</button><button data-theme-set="dark" class="${th === 'dark' ? 'on' : ''}">${ic('moon')} Oscura</button><button data-theme-set="light" class="${th === 'light' ? 'on' : ''}">${ic('sun')} Clara</button></div></section>
@@ -1551,6 +1561,7 @@ function bind(m) {
     if (a === 'newmember') editMember(null);
     if (a === 'remind') toast(DB.mode === 'demo' ? 'En la versión real, ahora le llega el aviso por correo y notificación a quien falte por confirmar o elegir.' : 'Recordatorio enviado al equipo.', 4200);
     if (a === 'saveme') { const mm = Object.assign({}, me(), { name: $('#pName').value.trim(), phone: $('#pPhone').value.trim(), roles: $$('#pRoles .pill.gold').map(b => b.dataset.role) }); await DB.saveMember(mm); toast('Perfil guardado.'); await reload(); }
+    if (a === 'setpw') { const v = $('#pPw').value; if (v.length < 8) { toast('Usa al menos 8 caracteres.'); return; } try { await DB.setPassword(v); $('#pPw').value = ''; try { localStorage.setItem('rf-login', 'pw'); } catch (_) {} toast('Contraseña guardada. La próxima vez entras con ella.'); } catch (x) { toast(x.message, 5000); } }
     if (a === 'push') enablePush();
     if (a === 'install' && installEvt) { installEvt.prompt(); const r = await installEvt.userChoice; installEvt = null; if (r.outcome !== 'accepted') render(); }
     if (a === 'reset') { DB.reset(); await reload(); toast('Volvieron los datos de ejemplo.'); }
@@ -1571,13 +1582,35 @@ async function enablePush() {
 
 /* ---------- entrada (código por correo) ---------- */
 function viewLogin(err) {
-  document.getElementById('root').innerHTML = `<div style="min-height:100%;display:grid;place-items:center;padding:24px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))"><div class="card" style="width:min(420px,100%);display:flex;flex-direction:column;gap:14px;padding:24px">
-    <div class="brand" style="padding:0">${logo()}<div><b>RF App</b><small>Rompiendo Fortalezas</small></div></div><h1 style="font-size:26px">Entra con tu correo</h1><p class="hint" style="margin:0" id="lMsg">Te mandamos un código a tu correo. Lo escribes aquí y listo, sin contraseña.</p>
-    <div class="field"><label for="lE">Correo</label><input class="in" id="lE" type="email" autocomplete="email" inputmode="email"></div>
-    <div class="field" id="lCW" hidden><label for="lC">Código del correo</label><input class="in" id="lC" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="••••••" style="font-family:var(--num);font-size:28px;letter-spacing:.35em;text-align:center"></div>
-    ${err ? `<p class="hint" style="color:var(--bad)">${esc(err)}</p>` : ''}<button class="btn primary" id="lGo">Enviarme el código</button></div></div>`;
-  let sent = false;
-  $('#lGo').onclick = async () => { const e = $('#lE').value.trim().toLowerCase(); try { if (!sent) { await DB.sendCode(e); sent = true; $('#lCW').hidden = false; $('#lGo').textContent = 'Entrar'; $('#lMsg').innerHTML = '<b>Revisa tu correo</b> (y la carpeta de spam). Te llegó un código de <b>app@rfortalezas.com</b>: cópialo y pégalo aquí.'; $('#lC').focus(); $('#lC').oninput = e => { const v = e.target.value.replace(/\D/g, ''); e.target.value = v; if (v.length >= 6 && !e.target.dataset.go) { e.target.dataset.go = 1; setTimeout(() => $('#lGo').click(), 150); } }; } else { await DB.verify(e, $('#lC').value.trim()); location.reload(); } } catch (x) { toast(x.message, 5000); } };
+  let mode = (() => { try { return localStorage.getItem('rf-login') || 'code'; } catch (e) { return 'code'; } })(), sent = false;
+  const root = document.getElementById('root');
+  const draw = () => {
+    root.innerHTML = `<div class="login"><div class="card lcard">
+      <div class="lhead">${logo('lg')}<h1>RF App</h1><p class="hint">Rompiendo Fortalezas</p></div>
+      <div class="seg stg"><button class="${mode === 'pw' ? 'on' : ''}" data-lm="pw">Contraseña</button><button class="${mode === 'code' ? 'on' : ''}" data-lm="code">Código por correo</button></div>
+      <div class="field"><label for="lE">Correo</label><input class="in" id="lE" type="email" autocomplete="email" inputmode="email" value="${esc((() => { try { return localStorage.getItem('rf-email') || ''; } catch (e) { return ''; } })())}"></div>
+      ${mode === 'pw' ? `<div class="field"><label for="lP">Contraseña</label><input class="in" id="lP" type="password" autocomplete="current-password"></div>
+        <button class="btn primary" id="lGo">Entrar</button><p class="hint" style="margin:0;text-align:center">¿Primera vez o se te olvidó? Usa <a href="#" data-lm="code">código por correo</a>.</p>`
+      : `<p class="hint" style="margin:0" id="lMsg">Te mandamos un código a tu correo. Lo escribes aquí y listo.</p>
+        <div class="field" id="lCW"${sent ? '' : ' hidden'}><label for="lC">Código del correo</label><input class="in" id="lC" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="••••••" style="font-size:28px;letter-spacing:.35em;text-align:center"></div>
+        <button class="btn primary" id="lGo">${sent ? 'Entrar' : 'Enviarme el código'}</button>`}
+      ${err ? `<p class="hint" style="color:var(--bad);margin:0">${esc(err)}</p>` : ''}</div></div>`;
+    $$('[data-lm]').forEach(b => b.onclick = ev => { ev.preventDefault(); mode = b.dataset.lm; err = ''; try { localStorage.setItem('rf-login', mode); } catch (e) {} draw(); });
+    const em = () => { const e = $('#lE').value.trim().toLowerCase(); try { localStorage.setItem('rf-email', e); } catch (x) {} return e; };
+    const go = $('#lGo');
+    if (mode === 'pw') {
+      const run = async () => { go.disabled = true; try { await DB.signInPw(em(), $('#lP').value); location.reload(); } catch (x) { err = x.message; draw(); } };
+      go.onclick = run; $('#lP').onkeydown = e => { if (e.key === 'Enter') run(); };
+    } else {
+      const c = $('#lC');
+      if (c) c.oninput = e => { const v = e.target.value.replace(/\D/g, ''); e.target.value = v; if (v.length >= 6 && !e.target.dataset.go) { e.target.dataset.go = 1; setTimeout(() => go.click(), 150); } };
+      go.onclick = async () => { const e = em(); go.disabled = true;
+        try { if (!sent) { await DB.sendCode(e); sent = true; err = ''; draw(); $('#lMsg').innerHTML = '<b>Revisa tu correo</b> (y la carpeta de spam). Te llegó un código de <b>app@rfortalezas.com</b>: pégalo aquí.'; $('#lC').focus(); }
+          else { await DB.verify(e, $('#lC').value.trim()); location.reload(); } }
+        catch (x) { err = /sending/i.test(x.message) ? 'No pudimos mandar el correo. Intenta de nuevo en un momento.' : /expired|invalid/i.test(x.message) ? 'Ese código no sirve o ya venció. Pide uno nuevo.' : x.message; if (c) c.dataset.go = ''; draw(); } };
+    }
+  };
+  draw();
 }
 
 (async function start() {
