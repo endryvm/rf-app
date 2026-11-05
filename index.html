@@ -578,6 +578,7 @@ body::after{content:"";position:fixed;inset:-10%;z-index:-1;pointer-events:none;
 .lhead{display:flex;flex-direction:column;align-items:center;gap:6px;margin-bottom:4px}
 .lhead h1{font-size:28px}.lhead .hint{margin:0}
 .logo.lg{width:76px;height:76px;border-radius:20px}
+.gd{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;background:var(--card2);color:var(--blue);flex:none}.gd svg{width:26px;height:26px}
 
 </style>
 <div id="root"></div>
@@ -794,6 +795,7 @@ const SupaDB = (cfg) => {
     },
     async sendCode(email) { await q(sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } })); },
     async signInPw(email, password) { const { error } = await sb.auth.signInWithPassword({ email, password }); if (error) throw new Error(/invalid/i.test(error.message) ? 'Correo o contraseña incorrectos. Si todavía no creaste tu contraseña, entra con código.' : error.message); },
+    async drive(action, extra) { const { data, error } = await sb.functions.invoke('drive', { body: Object.assign({ action }, extra || {}) }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } if (data && data.error) throw new Error(data.error); return data; },
     async setPassword(password) { await q(sb.auth.updateUser({ password })); },
     async verify(email, token) { await q(sb.auth.verifyOtp({ email, token, type: 'email' })); },
     async signOut() { await sb.auth.signOut(); },
@@ -987,6 +989,7 @@ const I = {
   gift: '<rect x="3.5" y="8" width="17" height="4" rx="1"/><path d="M5 12v8h14v-8M12 8v12M12 8c-1.5-3-5-3.5-5-1s5 1 5 1zm0 0c1.5-3 5-3.5 5-1s-5 1-5 1z"/>', book: '<path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z"/><path d="M5 18a2 2 0 0 1 2-2h12M12 7v6M9.5 9.5h5"/>',
   cup: '<path d="M7 3h10l-1 7a4 4 0 0 1-8 0z"/><path d="M12 14v6M8.5 21h7"/>', heart: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>', moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+  cloud: '<path d="M7 18h10.5a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.4 9.1 4.5 4.5 0 0 0 7 18z"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>', note: '<path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/>', send: '<path d="M21 3 10 14M21 3l-7 18-4-7-7-4z"/>',
 };
@@ -1054,7 +1057,7 @@ function render() {
   m.innerHTML = mhead() + html;
   $$('[data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
   $$('[data-themetg]').forEach(b => b.onclick = () => setTheme(effTheme() === 'dark' ? 'light' : 'dark'));
-  bind(m); if (ST.tab === 'mix' && !ST.view) mixBind();
+  bind(m); if (ST.tab === 'mix' && !ST.view) mixBind(); if (ST.tab === 'me') bindDrive();
 }
 const demoBar = () => DB.mode !== 'demo' ? '' : `<div class="demo">${ic('bell')}<span><b>Modo demostración.</b> Datos de ejemplo guardados solo en este navegador. Ver como:</span>
   <div class="seg">${ST.members.filter(m => ['m0', 'm1', 'm4'].includes(m.id) || m.id === me().id).map(m => `<button class="${m.id === me().id ? 'on' : ''}" data-as="${m.id}">${m.is_director ? 'Director' : esc(m.name.replace(/\s*\(ejemplo\)/, ''))}</button>`).join('')}</div></div>`;
@@ -1275,6 +1278,26 @@ function installCard() {
     ${installEvt ? `<button class="btn primary" data-act="install">${ic('down')}Instalar RF App</button>` : how}</section>`;
 }
 
+/* ---------- Google Drive (solo director): biblioteca de secuencias ---------- */
+const DRIVE_CID = '751163439743-g5lpp2kb7amu1d0u5psbrou5ord3spt5.apps.googleusercontent.com';
+const DRV = { st: null, busy: false };
+function driveCard() {
+  if (DB.mode === 'demo') return `<section class="card inst col"><div class="instt"><span class="gd">${ic('cloud')}</span><div class="tx"><b>Biblioteca de secuencias en Google Drive</b><small>En la versión real, el director conecta su Drive aquí y RF Playback sube y baja las secuencias de la carpeta «RF App · Secuencias».</small></div></div></section>`;
+  if (!DRV.st && !DRV.busy) { DRV.busy = true; DB.drive('status').then(r => { DRV.st = r; }).catch(e => { DRV.st = { error: e.message }; }).finally(() => { DRV.busy = false; const el = $('#driveCard'); if (el) el.outerHTML = driveCard(); bindDrive(); }); }
+  const s = DRV.st;
+  const body = !s ? '<p class="hint" style="margin:0">Revisando…</p>'
+    : s.error ? `<p class="hint" style="margin:0;color:var(--bad)">${esc(s.error)}</p>`
+    : s.connected ? `<div class="links"><span class="pill ok">${ic('check')}Conectado</span><span class="hint">${esc(s.email || '')}</span><span style="flex:1"></span><button class="btn small ghost danger" data-act="drivegone">Desconectar</button></div>`
+    : `<button class="btn primary" data-act="driveconn">${ic('cloud')}Conectar Google Drive</button>`;
+  return `<section class="card inst col" id="driveCard"><div class="instt"><span class="gd">${ic('cloud')}</span><div class="tx"><b>Biblioteca de secuencias</b><small>RF Playback guarda y baja las secuencias de la carpeta «RF App · Secuencias» de tu Drive. La app solo puede ver esa carpeta; el resto de tu Drive queda privado.</small></div></div>${body}</section>`;
+}
+function bindDrive() {
+  const c = $('[data-act=driveconn]'); if (c) c.onclick = () => { const st = Math.random().toString(36).slice(2) + Date.now().toString(36); try { sessionStorage.setItem('rf-drive-state', st); } catch (e) {}
+    const q = new URLSearchParams({ client_id: DRIVE_CID, redirect_uri: location.origin + '/drive.html', response_type: 'code', scope: 'https://www.googleapis.com/auth/drive.file', access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state: st });
+    location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + q; };
+  const d = $('[data-act=drivegone]'); if (d) d.onclick = async ev => { ev.stopPropagation(); if (!d.dataset.ok) { d.dataset.ok = 1; d.textContent = 'Toca otra vez para desconectar'; return; } try { await DB.drive('disconnect'); DRV.st = null; toast('Google Drive desconectado.'); render(); } catch (e) { toast(e.message, 5000); } };
+}
+
 /* ---------- Perfiles ---------- */
 function memberStats(id) {
   const P = past(), inS = s => s.team.some(t => t.member_id === id && t.status !== 'no');
@@ -1331,6 +1354,7 @@ function viewMe() {
       <div class="field"><label>Lo que tocas o cantas</label><div class="links" id="pRoles">${ROLES.map(r => `<button class="pill${(m.roles || []).includes(r) ? ' gold' : ''}" data-role="${esc(r)}" type="button">${esc(r)}</button>`).join('')}</div></div>
       <div><button class="btn primary" data-act="saveme">Guardar</button></div></section>
     ${installCard()}
+    ${isDir() ? driveCard() : ''}
     ${DB.mode === 'demo' ? '' : `<section class="card"><div class="sechead"><h3>Tu contraseña</h3></div><p class="hint" style="margin:6px 0 12px">Créala para entrar con correo y contraseña, sin esperar el código. Mínimo 8 caracteres.</p>
       <div class="links"><input class="in" id="pPw" type="password" autocomplete="new-password" placeholder="Nueva contraseña" style="flex:1;min-width:180px"><button class="btn primary" data-act="setpw">Guardar contraseña</button></div></section>`}
     <section class="card"><div class="sechead"><h3>Recordatorios</h3></div><p class="hint" style="margin:8px 0 12px">Te avisamos los lunes si te toca elegir canciones, y un día antes de cada ensayo.</p>
