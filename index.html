@@ -1,5 +1,5 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0E1220"><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icon-192.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0E1220"><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icon-512.png"><link rel="icon" href="icon-192.png"><meta name="apple-mobile-web-app-title" content="RF App"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>RF App</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -359,7 +359,7 @@ button.pill{cursor:pointer}
 .pgsongs span{display:flex;align-items:baseline;gap:8px;font-size:13.5px;cursor:pointer}
 .pgsongs em{font-style:normal;color:var(--gold);font-weight:700;width:14px}
 .pgsongs small{margin-left:auto;color:var(--dim);font-size:12px}
-.pg.t-alabanza .pgi{background:linear-gradient(160deg,var(--gold),var(--gold2));color:var(--gold-ink);border-color:transparent}
+.pg.t-canciones .pgi{background:linear-gradient(160deg,var(--gold),var(--gold2));color:var(--gold-ink);border-color:transparent}
 .pg.t-video .pgi{color:var(--info)}
 .pg.t-especial .pgi{color:#E58FB6}
 .pg.t-predica .pgi{color:var(--ok)}
@@ -368,6 +368,14 @@ button.pill{cursor:pointer}
 .pg.mine .pgx{border-color:var(--gold);box-shadow:0 0 0 1px color-mix(in srgb,var(--gold) 40%,transparent)}
 .pill svg{width:13px;height:13px}
 .seg button svg{width:14px;height:14px;vertical-align:-2px}
+
+.pavb{border:0;background:none;padding:0;border-radius:50%;cursor:zoom-in;display:block}
+.pbig{display:grid;place-items:center}
+.pbig img{width:min(100%,420px);aspect-ratio:1;object-fit:cover;border-radius:24px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+.pbig .av{width:180px;height:180px;font-size:60px;font-family:var(--display)}
+label.btn{cursor:pointer}
+.logo{width:38px;height:38px;border-radius:11px;flex:none;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.mhead .logo{width:32px;height:32px;border-radius:9px}
 
 </style>
 <div id="root"></div>
@@ -458,17 +466,17 @@ const VOICE = r => /voz|coros|direcci/i.test(r);
 const COLORS = ['#E9C47A', '#7AA7FF', '#4FC7A3', '#F08A6E', '#B48BF0', '#F2B455', '#6FD0E0', '#E58FB6'];
 // partes del programa del servicio
 const PTYPES = {
-  bienvenida: { l: 'Bienvenida', mins: 5, ic: 'wave' }, oracion: { l: 'Oración', mins: 3, ic: 'pray' }, alabanza: { l: 'Alabanza', mins: 25, ic: 'music' }, video: { l: 'Video', mins: 3, ic: 'video' },
+  bienvenida: { l: 'Bienvenida', mins: 5, ic: 'wave' }, oracion: { l: 'Oración', mins: 3, ic: 'pray' }, canciones: { l: 'Canciones', mins: 25, ic: 'music' }, video: { l: 'Video', mins: 3, ic: 'video' },
   anuncios: { l: 'Anuncios', mins: 5, ic: 'mega' }, especial: { l: 'Participación especial', mins: 5, ic: 'star' }, ofrenda: { l: 'Ofrendas', mins: 5, ic: 'gift' }, predica: { l: 'Prédica', mins: 40, ic: 'book' },
-  santacena: { l: 'Santa Cena', mins: 10, ic: 'cup' }, ministracion: { l: 'Ministración', mins: 10, ic: 'heart' }, despedida: { l: 'Despedida', mins: 3, ic: 'wave' }, otro: { l: 'Otro', mins: 5, ic: 'note' },
+  ministracion: { l: 'Ministración', mins: 10, ic: 'heart' }, despedida: { l: 'Despedida', mins: 3, ic: 'wave' }, otro: { l: 'Otro', mins: 5, ic: 'note' },
 };
-const PTEMPLATE = ['bienvenida', 'oracion', 'alabanza', 'anuncios', 'ofrenda', 'video', 'predica', 'despedida'];
+const PTEMPLATE = ['bienvenida', 'oracion', 'canciones', 'anuncios', 'ofrenda', 'video', 'predica', 'despedida'];
 const ytSearch = q => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
 const spSearch = q => 'https://open.spotify.com/search/' + encodeURIComponent(q);
 
 function demoSeed() {
   const ppl = [
-    ['Director de alabanza (ejemplo)', ['Dirección', 'Voz principal'], 1], ['Cantante 1 (ejemplo)', ['Voz principal', 'Coros']], ['Cantante 2 (ejemplo)', ['Coros']],
+    ['Director de música (ejemplo)', ['Dirección', 'Voz principal'], 1], ['Cantante 1 (ejemplo)', ['Voz principal', 'Coros']], ['Cantante 2 (ejemplo)', ['Coros']],
     ['Baterista (ejemplo)', ['Batería']], ['Bajista (ejemplo)', ['Bajo']], ['Guitarrista (ejemplo)', ['Guitarra eléctrica', 'Guitarra acústica']], ['Tecladista (ejemplo)', ['Teclado', 'Piano']], ['Sonidista (ejemplo)', ['Sonido', 'Secuencias']]];
   const BUSES = [5, 5, 6, 1, 2, 3, 4, 0];
   const members = ppl.map(([name, roles, dir], i) => ({ id: 'm' + i, name, email: `ejemplo${i}@correo.com`, phone: '', roles, is_director: !!dir, color: COLORS[i % COLORS.length], mix_bus: BUSES[i], photo: '', created_at: isoD(addDays(new Date(), -7 * (40 + i * 6))) }));
@@ -531,7 +539,7 @@ y a[C]prende otra vez a [D]confiar
   }
   const s2 = svc(after, 'Servicio dominical', { team: team([[0, 'Dirección', 'pending', 1], [2, 'Voz principal', 'pending', 1]]) });
   const P = (type, extra) => Object.assign({ id: uid(), type, title: '', who_id: '', who_name: '', mins: (PTYPES[type] || PTYPES.otro).mins, notes: '' }, extra || {});
-  s1.program = [P('bienvenida', { who_name: 'Pastor (ejemplo)' }), P('oracion', { who_id: 'm6' }), P('alabanza'), P('video', { title: 'Video de la campaña de jóvenes', notes: 'Lo trae el equipo de jóvenes; pedir el archivo antes del sábado' }), P('anuncios', { who_name: 'Hna. de anuncios (ejemplo)' }),
+  s1.program = [P('bienvenida', { who_name: 'Pastor (ejemplo)' }), P('oracion', { who_id: 'm6' }), P('canciones'), P('video', { title: 'Video de la campaña de jóvenes', notes: 'Lo trae el equipo de jóvenes; pedir el archivo antes del sábado' }), P('anuncios', { who_name: 'Hna. de anuncios (ejemplo)' }),
     P('especial', { title: 'Coro de niños', who_name: 'Ministerio infantil', mins: 6 }), P('ofrenda'), P('video', { mins: 2 }), P('predica', { who_name: 'Pastor (ejemplo)' }), P('despedida')];
   s2.program = [];
   return { members, songs, services: [...hist, s1, s2], me: 'm0' };
@@ -778,6 +786,8 @@ const I = {
   camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>', note: '<path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/>', send: '<path d="M21 3 10 14M21 3l-7 18-4-7-7-4z"/>',
 };
+const LOGO = 'data:image/png;base64,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';
+const logo = cls => `<img class="logo${cls ? ' ' + cls : ''}" src="${LOGO}" alt="RF App">`;
 const avt = (m, cls, st) => { m = m || {}; return `<span class="av${cls ? ' ' + cls : ''}" style="--c:${m.color || 'var(--gold)'}${st || ''}">${m.photo ? `<img src="${esc(m.photo)}" alt="">` : initials(m.name)}</span>`; };
 const effTheme = () => document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
 const themeBtn = cls => `<button class="ib tg${cls ? ' ' + cls : ''}" data-themetg aria-label="${effTheme() === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}" title="Modo claro / oscuro">${ic(effTheme() === 'dark' ? 'sun' : 'moon')}</button>`;
@@ -818,13 +828,13 @@ const TABS = [['home', 'Inicio', 'home'], ['services', 'Servicios', 'cal'], ['so
 function go(tab, view) { ST.tab = tab; ST.view = view || null; if (tab !== 'live') stopLive(); if (tab !== 'mix') mixStop(); else setTimeout(mixStart, 0); try { history.replaceState(null, '', '#' + tab); } catch (e) {} render(); window.scrollTo(0, 0); }
 function shell() {
   const pend = upcoming().some(s => myAssign(s).some(t => t.status === 'pending'));
-  return `<div class="app"><nav class="rail" aria-label="Secciones"><div class="brand"><span class="mono">RF</span><div><b>RF App</b><small>Alabanza</small></div><span style="flex:1"></span>${themeBtn()}</div>
+  return `<div class="app"><nav class="rail" aria-label="Secciones"><div class="brand">${logo()}<div><b>RF App</b><small>Rompiendo Fortalezas</small></div><span style="flex:1"></span>${themeBtn()}</div>
     ${TABS.map(([k, l, i]) => `<button class="navb${ST.tab === k ? ' on' : ''}" data-tab="${k}">${ic(i)}${l}${k === 'home' && pend ? '<span class="pill warn">1</span>' : ''}</button>`).join('')}
     <span class="sp"></span><button class="navb${ST.tab === 'me' ? ' on' : ''}" data-tab="me">${avt(me(), 'sm')}Mi perfil</button></nav>
     <main class="main" id="main"></main>
     <nav class="tabbar" aria-label="Secciones">${TABS.map(([k, l, i]) => `<button class="${ST.tab === k ? 'on' : ''}" data-tab="${k}">${ic(i)}${l}${k === 'home' && pend ? '<i class="dot"></i>' : ''}</button>`).join('')}</nav></div>`;
 }
-const mhead = () => `<header class="mhead"><span class="mono">RF</span><b>RF App</b><span class="sp"></span>${themeBtn()}<button class="mav${ST.tab === 'me' ? ' on' : ''}" data-tab="me" aria-label="Mi perfil">${avt(me(), 'sm')}</button></header>`;
+const mhead = () => `<header class="mhead">${logo()}<b>RF App</b><span class="sp"></span>${themeBtn()}<button class="mav${ST.tab === 'me' ? ' on' : ''}" data-tab="me" aria-label="Mi perfil">${avt(me(), 'sm')}</button></header>`;
 function render() {
   document.getElementById('root').innerHTML = shell();
   const m = $('#main');
@@ -1054,8 +1064,8 @@ function profileHtml(m, own) {
     [st.up.length, st.up.length === 1 ? 'servicio' : 'servicios', 'Próximos'], [st.okr == null ? '—' : st.okr + '%', 'confirmado', 'Responde']];
   const maxR = Math.max(1, ...Object.values(st.roles)), maxS = Math.max(1, ...st.top.map(x => x[1]));
   const att = st.last.filter(x => x.on).length;
-  return `<section class="phero"><div class="pav">${avt(m, 'xl')}${canPhoto ? `<label class="pcam" title="Cambiar foto">${ic('camera')}<input type="file" accept="image/*" hidden data-photo="${m.id}"></label>` : ''}</div>
-      <div class="ptx"><div class="eyebrow">${m.is_director ? 'Director · ' : ''}${st.since ? 'En el equipo desde ' + dMY.format(st.since) : 'Equipo de alabanza'}</div><h1>${esc(m.name)}</h1>
+  return `<section class="phero"><div class="pav"><button class="pavb" data-viewphoto="${m.id}" aria-label="Ver foto de ${esc(m.name)}">${avt(m, 'xl')}</button>${canPhoto ? `<label class="pcam" title="Cambiar foto">${ic('camera')}<input type="file" accept="image/*" hidden data-photo="${m.id}"></label>` : ''}</div>
+      <div class="ptx"><div class="eyebrow">${m.is_director ? 'Director · ' : ''}${st.since ? 'En el equipo desde ' + dMY.format(st.since) : 'Equipo de música'}</div><h1>${esc(m.name)}</h1>
         <div class="links" style="margin-top:8px">${(m.roles || []).map(r => `<span class="pill${VOICE(r) ? ' gold' : ''}">${VOICE(r) ? ic('mic') : ic('music')}${esc(r)}</span>`).join('') || '<span class="hint">Sin instrumento todavía</span>'}</div></div>
       ${dir && !own ? `<button class="btn small" data-member="${m.id}">${ic('edit')}Editar</button>` : ''}
       ${m.photo && canPhoto ? `<button class="btn small ghost" data-nophoto="${m.id}">Quitar foto</button>` : ''}</section>
@@ -1095,8 +1105,27 @@ function viewMe() {
 // foto: se recorta cuadrada y se achica en el teléfono antes de guardarla
 function photoData(file) {
   return new Promise((res, rej) => { const u = URL.createObjectURL(file), im = new Image();
-    im.onload = () => { const S = 320, c = document.createElement('canvas'); c.width = c.height = S; const k = Math.min(im.naturalWidth, im.naturalHeight); c.getContext('2d').drawImage(im, (im.naturalWidth - k) / 2, (im.naturalHeight - k) / 2, k, k, 0, 0, S, S); URL.revokeObjectURL(u); res(c.toDataURL('image/jpeg', .84)); };
+    im.onload = () => { const S = 560, c = document.createElement('canvas'); c.width = c.height = S; const k = Math.min(im.naturalWidth, im.naturalHeight); c.getContext('2d').drawImage(im, (im.naturalWidth - k) / 2, (im.naturalHeight - k) / 2, k, k, 0, 0, S, S); URL.revokeObjectURL(u); res(c.toDataURL('image/jpeg', .82)); };
     im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('No pude abrir esa imagen.')); }; im.src = u; });
+}
+
+function viewPhoto(id) {
+  const m = mem(id) || me(); const can = m.id === me().id || isDir();
+  const name = (m.name || 'foto').replace(/\s*\(ejemplo\)/, '').trim();
+  modal(`${ph(esc(name))}<div class="pbig">${m.photo ? `<img src="${esc(m.photo)}" alt="Foto de ${esc(name)}">` : `<span class="av" style="--c:${m.color || 'var(--gold)'}">${initials(m.name)}</span>`}</div>
+    <div class="links" style="justify-content:center">${m.photo ? `<button class="btn primary" id="phSave">${ic('down')}Guardar en el teléfono</button>` : ''}
+    ${can ? `<label class="btn">${ic('camera')}${m.photo ? 'Cambiar foto' : 'Poner foto'}<input type="file" accept="image/*" hidden id="phPick"></label>` : ''}
+    ${can && m.photo ? `<button class="btn ghost danger" id="phDel">${ic('trash')}Quitar</button>` : ''}</div>
+    ${can ? '<p class="hint" style="text-align:center;margin:0">Puedes tomarla con la cámara o elegirla de tus fotos. Se recorta cuadrada.</p>' : ''}`, (w, close) => {
+    const sv = $('#phSave', w); if (sv) sv.onclick = async () => {
+      const fn = 'RF App - ' + name + '.jpg';
+      try { const blob = await (await fetch(m.photo)).blob(); const f = new File([blob], fn, { type: 'image/jpeg' });
+        if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: name }); return; }
+      } catch (e) { if (e && e.name === 'AbortError') return; }
+      const a = document.createElement('a'); a.href = m.photo; a.download = fn; document.body.append(a); a.click(); a.remove(); toast('Foto descargada.'); };
+    const pk = $('#phPick', w); if (pk) pk.onchange = async () => { const f = pk.files && pk.files[0]; if (!f) return; try { const photo = await photoData(f); await DB.saveMember(Object.assign({}, m, { photo })); close(); toast('Foto actualizada.'); await reload(); } catch (x) { toast(x.message, 4000); } };
+    const dl = $('#phDel', w); if (dl) dl.onclick = async () => { await DB.saveMember(Object.assign({}, m, { photo: '' })); close(); await reload(); };
+  });
 }
 
 /* ---------- Programa del servicio ---------- */
@@ -1110,7 +1139,7 @@ function progWho(it) { const m = it.who_id && mem(it.who_id); return m ? `${avt(
 function programHtml(s) {
   const P = s.program || [], T = progTimes(s);
   return `<ol class="prog">${P.map((it, i) => { const t = ptype(it), blank = it.type === 'video' && !it.title;
-    const songs = it.type === 'alabanza' ? (s.songs.length ? `<div class="pgsongs">${s.songs.map((x, j) => { const so = song(x.song_id) || {}, l = mem(x.lead_id); return `<span data-song="${so.id || ''}" class="click"><em class="num">${j + 1}</em>${esc(so.title || '')}${l ? `<small>${esc(firstName(l.name))}</small>` : ''}</span>`; }).join('')}</div>` : '<p class="hint" style="margin:4px 0 0">Las canciones salen del repertorio cuando los cantantes las elijan.</p>') : '';
+    const songs = it.type === 'canciones' ? (s.songs.length ? `<div class="pgsongs">${s.songs.map((x, j) => { const so = song(x.song_id) || {}, l = mem(x.lead_id); return `<span data-song="${so.id || ''}" class="click"><em class="num">${j + 1}</em>${esc(so.title || '')}${l ? `<small>${esc(firstName(l.name))}</small>` : ''}</span>`; }).join('')}</div>` : '<p class="hint" style="margin:4px 0 0">Las canciones salen del repertorio cuando los cantantes las elijan.</p>') : '';
     return `<li class="pg t-${it.type}${blank ? ' blank' : ''}${it.who_id && it.who_id === me().id ? ' mine' : ''}"><span class="pgt num">${T[i] != null ? hhmm(T[i]) : ''}</span><span class="pgi">${ic(t.ic)}</span>
       <div class="pgx"><div class="pgh"><b>${esc(it.title || (blank ? 'Espacio para video' : t.l))}</b><span class="pgm num">${+it.mins || 0} min</span></div><small>${it.title && it.type !== 'otro' ? esc(t.l) : blank ? 'Por definir: el equipo de medios lo completa' : ''}</small>
       ${it.who_id || it.who_name ? `<div class="pgw">${progWho(it)}${it.who_id && it.who_id === me().id ? '<span class="pill gold">Te toca</span>' : ''}</div>` : ''}${it.notes ? `<p>${/^https?:\/\//.test(it.notes) ? `<a href="${esc(it.notes)}" target="_blank" rel="noopener">${esc(it.notes)}</a>` : esc(it.notes)}</p>` : ''}${songs}</div></li>`; }).join('')}</ol>`;
@@ -1118,7 +1147,7 @@ function programHtml(s) {
 function programSection(s) {
   const P = s.program || [], dir = isDir(), t0 = startMin(s), tot = progMins(P);
   return `<div class="sechead"><h3>Programa</h3><span class="sp"></span>${P.length && t0 != null ? `<span class="hint num">${fmtMin(t0)} – ${fmtMin(t0 + tot)} · ${tot} min</span>` : ''}${dir ? `<button class="btn small${P.length ? '' : ' primary'}" data-prog="${s.id}">${ic('edit')}${P.length ? 'Editar' : 'Armar programa'}</button>` : ''}</div>
-    <section class="card">${P.length ? programHtml(s) : `<div class="empty">${dir ? 'Arma el orden del servicio: bienvenida, alabanza, videos, participaciones especiales, prédica… Cada parte con su responsable y su tiempo.' : 'El director todavía no arma el programa.'}</div>`}</section>`;
+    <section class="card">${P.length ? programHtml(s) : `<div class="empty">${dir ? 'Arma el orden del servicio: bienvenida, canciones, videos, participaciones especiales, prédica… Cada parte con su responsable y su tiempo.' : 'El director todavía no arma el programa.'}</div>`}</section>`;
 }
 function editProgram(sid) {
   const s = ST.services.find(x => x.id === sid); let list = (s.program || []).map(x => Object.assign({}, x));
@@ -1130,7 +1159,7 @@ function editProgram(sid) {
       $('#pgL', w).innerHTML = list.length ? `<ol class="prog ed">${list.map((it, i) => { const t = ptype(it); return `<li class="pg t-${it.type}${it.type === 'video' && !it.title ? ' blank' : ''}"><span class="pgt num">${T[i] != null ? hhmm(T[i]) : ''}</span><span class="pgi">${ic(t.ic)}</span>
         <div class="pgx click" data-pgi="${i}"><div class="pgh"><b>${esc(it.title || (it.type === 'video' ? 'Espacio para video' : t.l))}</b><span class="pgm num">${+it.mins || 0} min</span></div><small>${esc((mem(it.who_id) || {}).name || it.who_name || 'Toca para poner responsable y detalles')}</small></div>
         <div class="links"><button class="ib" data-mv="${i}:-1" aria-label="Subir">${ic('up')}</button><button class="ib" data-mv="${i}:1" aria-label="Bajar">${ic('down')}</button></div></li>`; }).join('')}</ol>`
-        : `<div class="empty">Todavía está vacío.<br><button class="btn primary" data-pgtpl style="margin-top:12px">${ic('plus')}Usar el orden de siempre</button><br><small class="hint">Bienvenida, oración, alabanza, anuncios, ofrendas, video, prédica y despedida. Después lo ajustas.</small></div>`;
+        : `<div class="empty">Todavía está vacío.<br><button class="btn primary" data-pgtpl style="margin-top:12px">${ic('plus')}Usar el orden de siempre</button><br><small class="hint">Bienvenida, oración, canciones, anuncios, ofrendas, video, prédica y despedida. Después lo ajustas.</small></div>`;
       const tot = progMins(list), t0 = startMin(s); $('#pgTot', w).textContent = list.length ? `${list.length} partes · ${tot} min${t0 != null ? ' · termina ' + fmtMin(t0 + tot) : ''}` : '';
       $$('[data-mv]', w).forEach(b => b.onclick = () => { const [i, d] = b.dataset.mv.split(':').map(Number); const j = i + d; if (j < 0 || j >= list.length) return; [list[i], list[j]] = [list[j], list[i]]; draw(); });
       $$('[data-pgi]', w).forEach(b => b.onclick = () => editProgItem(list, +b.dataset.pgi, draw));
@@ -1271,6 +1300,7 @@ function bind(m) {
   on('[data-member]', e => editMember(e.dataset.member));
   on('[data-prof]', e => { ST.view = { type: 'member', id: e.dataset.prof }; render(); window.scrollTo(0, 0); });
   on('[data-prog]', e => editProgram(e.dataset.prog));
+  on('[data-viewphoto]', e => viewPhoto(e.dataset.viewphoto));
   $$('[data-photo]', m).forEach(inp => inp.onchange = async () => { const f = inp.files && inp.files[0]; if (!f) return; try { const photo = await photoData(f); const who = Object.assign({}, mem(inp.dataset.photo)); who.photo = photo; await DB.saveMember(who); toast('Foto actualizada.'); await reload(); } catch (x) { toast(x.message, 4000); } });
   on('[data-nophoto]', async e => { const who = Object.assign({}, mem(e.dataset.nophoto), { photo: '' }); await DB.saveMember(who); await reload(); });
   on('[data-mode]', e => { ST.sheet.mode = e.dataset.mode; render(); });
@@ -1312,7 +1342,7 @@ async function enablePush() {
 /* ---------- entrada (código por correo) ---------- */
 function viewLogin(err) {
   document.getElementById('root').innerHTML = `<div style="min-height:100%;display:grid;place-items:center;padding:24px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))"><div class="card" style="width:min(420px,100%);display:flex;flex-direction:column;gap:14px;padding:24px">
-    <div class="brand" style="padding:0"><span class="mono">RF</span><div><b>RF App</b><small>Alabanza</small></div></div><h1 style="font-size:26px">Entra con tu correo</h1><p class="hint" style="margin:0" id="lMsg">Te mandamos un correo con un enlace para entrar. No necesitas contraseña.</p>
+    <div class="brand" style="padding:0">${logo()}<div><b>RF App</b><small>Rompiendo Fortalezas</small></div></div><h1 style="font-size:26px">Entra con tu correo</h1><p class="hint" style="margin:0" id="lMsg">Te mandamos un correo con un enlace para entrar. No necesitas contraseña.</p>
     <div class="field"><label for="lE">Correo</label><input class="in" id="lE" type="email" autocomplete="email" inputmode="email"></div>
     <div class="field" id="lCW" hidden><label for="lC">¿El correo trae un código de 6 números? Escríbelo aquí</label><input class="in" id="lC" inputmode="numeric" autocomplete="one-time-code" maxlength="6" style="font-family:var(--num);font-size:24px;letter-spacing:.3em"></div>
     ${err ? `<p class="hint" style="color:var(--bad)">${esc(err)}</p>` : ''}<button class="btn primary" id="lGo">Enviarme el enlace</button></div></div>`;
