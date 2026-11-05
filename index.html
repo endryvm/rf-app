@@ -535,6 +535,44 @@ a{color:var(--blue)}
 .kbd{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:7px;background:var(--card2);vertical-align:-6px}
 .kbd svg{width:14px;height:14px}
 
+/* ===== vidrio pulido: transparencia y desenfoque, sin biseles ===== */
+:root{--glass:rgba(255,255,255,.055);--glass2:rgba(255,255,255,.09);--gline:rgba(255,255,255,.09);--blur:blur(28px) saturate(1.9)}
+:root[data-theme="light"]{--ink:#ECECF1;--glass:rgba(255,255,255,.58);--glass2:rgba(255,255,255,.72);--gline:rgba(255,255,255,.75);--card:rgba(255,255,255,.58);--card2:rgba(118,118,128,.1)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--ink:#ECECF1;--glass:rgba(255,255,255,.58);--glass2:rgba(255,255,255,.72);--gline:rgba(255,255,255,.75);--card:rgba(255,255,255,.58);--card2:rgba(118,118,128,.1)}}
+:root:not([data-theme="light"]){--card:rgba(255,255,255,.055);--card2:rgba(255,255,255,.08)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--card:rgba(255,255,255,.58)}}
+/* luces de fondo para que el vidrio tenga algo que dejar ver */
+body::after{content:"";position:fixed;inset:-10%;z-index:-1;pointer-events:none;background:
+  radial-gradient(42% 32% at 88% 4%,rgba(226,192,127,.28),transparent 70%),
+  radial-gradient(40% 30% at 6% 38%,rgba(10,132,255,.20),transparent 70%),
+  radial-gradient(45% 30% at 80% 85%,rgba(226,192,127,.16),transparent 70%)}
+:root[data-theme="light"] body::after{opacity:.9}
+.card,.stat,.tile,.empty,.demo,.livebar,.role,.pgx,.mxpick label,.btn:not(.primary),.ib,.seg,.search,.in,select.in,textarea.in,.lk{
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
+.card,.stat,.tile,.empty,.demo,.livebar,.role,.pgx{background:var(--glass);border:1px solid var(--gline)}
+.tile{border:1px solid var(--gline)}
+.btn:not(.primary),.ib{background:var(--glass2);border:1px solid var(--gline)}
+.btn.ghost{background:var(--glass)}
+.mhead{background:transparent;-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px;background:color-mix(in srgb,var(--ink) 55%,transparent)}
+/* panel negro: vidrio ahumado */
+.hero,.phero{background:radial-gradient(90% 70% at 100% 0%,rgba(226,192,127,.2),transparent 60%),linear-gradient(180deg,rgba(44,44,48,.82),rgba(6,6,8,.9));-webkit-backdrop-filter:blur(30px) saturate(1.8);backdrop-filter:blur(30px) saturate(1.8);border:1px solid rgba(255,255,255,.08)}
+.qa span{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+.hero .btn,.phero .btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+.hero .task,.hero .cal{background:rgba(255,255,255,.08)}
+/* barra de abajo: vidrio oscuro translúcido */
+.tabbar{background:rgba(18,18,20,.62);-webkit-backdrop-filter:blur(30px) saturate(1.9);backdrop-filter:blur(30px) saturate(1.9);border:1px solid rgba(255,255,255,.12)}
+.tabbar button.on{background:rgba(255,255,255,.92)}
+.tabbar button:not(.on){color:#A1A1A6}
+/* ventanas y avisos de vidrio */
+.panel{background:color-mix(in srgb,var(--ink) 72%,transparent);-webkit-backdrop-filter:blur(40px) saturate(1.9);backdrop-filter:blur(40px) saturate(1.9);border:1px solid var(--gline)}
+.modal{background:rgba(0,0,0,.28)}
+.toast{background:rgba(24,24,26,.7);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)}
+.rail{background:color-mix(in srgb,var(--ink2) 55%,transparent);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
+.console{background:linear-gradient(180deg,rgba(30,30,33,.85),rgba(0,0,0,.92));-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);border:1px solid rgba(255,255,255,.08)}
+.seg button.on{background:var(--glass2);box-shadow:0 1px 6px rgba(0,0,0,.12)}
+:root[data-theme="light"] .seg button.on{background:#fff}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .seg button.on{background:#fff}}
+
 </style>
 <div id="root"></div>
 <script>
