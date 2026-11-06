@@ -1604,10 +1604,35 @@ function parseSynced(txt) {
   return out.length > 3 ? out : null;
 }
 // letra sola → estrofas (las líneas en blanco separan); la primera estrofa que se repite se marca como coro
+// letra sola → secciones. Las estrofas que se parecen (aunque cambie una palabra) son la misma parte:
+// la que más se repite es el Coro, la que va justo antes del coro y se repite es el Pre-coro,
+// una que sale una sola vez después del segundo coro es el Puente; las demás son Versos.
 function lyricsToChart(plain) {
   const st = String(plain || '').replace(/\r/g, '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
-  const cnt = {}; st.forEach(x => cnt[normT(x)] = (cnt[normT(x)] || 0) + 1);
-  let v = 0; return st.map(x => (cnt[normT(x)] > 1 ? '[Coro]' : `[Verso ${++v}]`) + '\n' + x).join('\n\n');
+  const lines = x => x.split('\n').map(normT).filter(Boolean);
+  const sim = (a, b) => { const A = new Set(lines(a)), B = new Set(lines(b)); let n = 0; A.forEach(l => { if (B.has(l)) n++; }); return n / Math.max(1, Math.min(A.size, B.size)); };
+  const grp = []; st.forEach((x, i) => { let g = -1; for (let j = 0; j < i; j++) if (sim(x, st[j]) >= 0.5) { g = grp[j]; break; } grp.push(g >= 0 ? g : i); });
+  const cnt = {}; grp.forEach(g => cnt[g] = (cnt[g] || 0) + 1);
+  const rep = Object.keys(cnt).filter(g => cnt[g] > 1).map(Number).sort((a, b) => cnt[b] - cnt[a] || a - b);
+  const label = {}; const coro = rep[0];
+  if (coro != null) label[coro] = 'Coro';
+  rep.slice(1).forEach(g => { const before = grp.every((x, i) => x !== g || grp[i + 1] === coro); label[g] = before ? 'Pre-coro' : (label[g] || ''); });
+  const coroIdx = grp.map((g, i) => g === coro ? i : -1).filter(i => i >= 0);
+  let v = 0; const verseNo = {};
+  return st.map((x, i) => { const g = grp[i]; let name = label[g];
+    if (!name && cnt[g] === 1 && coroIdx.length >= 2 && i > coroIdx[1] - 1 && i > coroIdx[0] && i < st.length) name = coroIdx.some(c => c > i) || i === st.length - 1 ? 'Puente' : '';
+    if (!name) { if (!verseNo[g]) verseNo[g] = ++v; name = 'Verso ' + verseNo[g]; }
+    return `[${name}]\n${x}`; }).join('\n\n');
+}
+// pide a la IA solo los NOMBRES de las secciones (no devuelve letra): «Verso 1», «Coro»…
+async function aiSectionNames(chart) {
+  const blocks = String(chart || '').split(/\n\s*\n/).map(b => b.replace(/^\s*\[[^\]]+\]\s*\n?/, '').trim()).filter(Boolean);
+  if (blocks.length < 2) return null;
+  const q = 'Estas son las estrofas de una canción, numeradas. Dime qué parte es cada una (Intro, Verso 1, Verso 2, Pre-coro, Coro, Puente, Final…). Responde SOLO con un arreglo JSON de nombres, uno por estrofa, en el mismo orden. No repitas la letra.\n\n' + blocks.map((b, i) => `#${i + 1}\n${b}`).join('\n\n');
+  const t = await DB.ia({ messages: [{ role: 'user', text: q }], context: '', task: 'chat' });
+  const m = /\[[\s\S]*?\]/.exec(t || ''); if (!m) return null; let names; try { names = JSON.parse(m[0]); } catch (e) { return null; }
+  if (!Array.isArray(names) || names.length !== blocks.length) return null;
+  return blocks.map((b, i) => `[${String(names[i]).replace(/[\[\]]/g, '').trim() || 'Verso'}]\n${b}`).join('\n\n');
 }
 
 /* ---------- juntar los acordes del audio con la letra que trae tiempos ---------- */
@@ -1656,6 +1681,24 @@ function progressionChart(an, key) {
   const flats = useFlats(key), bars = analysisBars(an, 4); if (!bars.length) return an.segs.map(s => `[${transChord(s.ch, 0, flats)}]`).join(' ');
   const rows = []; for (let i = 0; i < bars.length; i += 4) { const cs = bars.slice(i, i + 4).flatMap(b => b.cs).map(c => c && transChord(c, 0, flats)); const d = cs.filter((c, j) => c && c !== cs[j - 1]); if (d.length) rows.push(d.map(c => `[${c}]`).join(' ')); }
   return '[Progresión del audio]\n' + rows.join('\n');
+}
+// ver el cifrado en la página original, en una ventana encima de la app (no se copia nada solo: lo copias tú si quieres)
+const CHORD_SITES = [['Cifra Club', 'cifraclub.com'], ['Ultimate Guitar', 'ultimate-guitar.com'], ['LaCuerda', 'lacuerda.net'], ['Acordes y letras en Google', '']];
+const chordSiteUrl = (t, a, d) => 'https://www.google.com/search?q=' + encodeURIComponent(`${t} ${a || ''} ${d ? 'site:' + d : 'acordes cifrado'}`.trim().replace(/\s+/g, ' '));
+function openWeb(url) {
+  const B = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.Browser;
+  if (B && B.open) return B.open({ url, presentationStyle: 'popover' });
+  const w = Math.min(560, screen.availWidth - 40), h = Math.min(900, screen.availHeight - 60);
+  const win = window.open(url, 'rfcifra', matchMedia('(pointer:coarse)').matches ? '' : `popup=yes,width=${w},height=${h},left=${screen.availWidth - w - 20},top=40`);
+  if (!win) window.location.href = url;
+}
+function openChordSources(t, a, onPaste) {
+  modal(`${ph('Ver cifrado · ' + esc(t))}<p class="hint" style="margin-top:0">Se abre la página original encima de la app para verlo. Si lo quieres guardar aquí: selecciona desde el primer acorde hasta el final, cópialo, vuelve y toca <b>«Pegar cifrado»</b>. La app lo acomoda sola con secciones y acordes en su sílaba.</p>
+    <div class="list">${CHORD_SITES.map(([n, d], i) => `<button type="button" class="row click" data-cs="${i}"><span class="tx"><b>${esc(n)}</b><small>${d ? 'Buscar «' + esc(t) + '» en ' + d : 'Todas las páginas'}</small></span>${ic('back')}</button>`).join('')}</div>
+    ${onPaste ? '<div class="links"><span style="flex:1"></span><button class="btn primary" id="csPaste">Ya lo copié: pegar cifrado</button></div>' : ''}`, (w, close) => {
+    $$('[data-cs]', w).forEach(b => b.onclick = () => { const [, d] = CHORD_SITES[+b.dataset.cs]; openWeb(chordSiteUrl(t, a, d)); });
+    const pz = $('#csPaste', w); if (pz) pz.onclick = () => { close(); onPaste(); };
+  });
 }
 const searchChordsUrl = (t, a) => 'https://www.google.com/search?q=' + encodeURIComponent(`${t} ${a || ''} acordes`.trim());
 
@@ -1723,11 +1766,14 @@ function studioBind(s, w, ta, h) {
     if (r.chart && putChart(r.chart, 'lo del archivo')) msg(`Importado desde ${r.from}. Revisa con la vista previa.`); };
 
   // 5) revisar el cifrado con IA
+  $('#sSecAI', w).onclick = async () => { const ch = ta.value.trim(); if (!ch) return toast('Primero pon la letra.'); const b = $('#sSecAI', w); b.disabled = true; msg('Pidiéndole a la IA que nombre las secciones…');
+    try { const v = await aiSectionNames(ch); if (v) { ta.value = v; refresh(); msg('Listo: secciones nombradas. Revisa que el coro y los versos quedaron bien.'); } else msg('La IA no pudo ordenar las secciones esta vez. Corrige con los botones de Sección.'); }
+    catch (e) { msg(e.message || 'No se pudo usar la IA ahora.'); } b.disabled = false; };
   $('#sAI', w).onclick = () => { const ch = ta.value.trim(); if (!ch) return toast('Primero pon la letra con acordes.');
     AI.msgs = []; openAI(`Revisa este cifrado de «${$('#sT', w).value.trim() || 'la canción'}» en tono ${$('#sK', w).value || '?'}${s.analysis ? ` (el análisis del audio dio ${s.analysis.key}, ${s.analysis.bpm} BPM)` : ''}: dime qué acordes no cuadran con el tono, si los nombres de las secciones están bien y devuélvemelo corregido.\n\n${ch}`, { title: 'Revisar cifrado con IA', task: 'chord', apply: v => { ta.value = v; refresh(); } }); };
   // 4) buscar un cifrado en internet: se abre en otra pestaña y lo pegas
   $('#sGo', w).onclick = () => { const t = $('#sT', w).value.trim(); if (!t) { $('#sT', w).focus(); return toast('Escribe primero el nombre de la canción.'); }
-    window.open(searchChordsUrl(t, $('#sA', w).value.trim()), '_blank', 'noopener'); msg('Cuando encuentres el cifrado, cópialo completo y toca «Pegar cifrado».'); };
+    openChordSources(t, $('#sA', w).value.trim(), () => $('#sPaste', w).click()); };
 }
 function openExport(s) {
   if (!s) return;
@@ -2160,7 +2206,7 @@ function viewSong(id) {
       <div class="links">${s.youtube ? `<a class="lk yt big" target="_blank" rel="noopener" href="${esc(s.youtube)}">${ic('yt')}Escuchar en YouTube</a>` : ''}${s.spotify ? `<a class="lk sp big" target="_blank" rel="noopener" href="${esc(s.spotify)}">${ic('sp')}Escuchar en Spotify</a>` : ''}${!s.youtube && !s.spotify ? '<span class="pill warn">Falta el enlace de la versión original</span>' : ''}<button class="btn small" data-editsong="${s.id}">${ic('edit')}Editar</button></div></div>
     <div class="tools"><div class="seg"><button class="${mode === 'lyrics' ? 'on' : ''}" data-mode="lyrics">Letra</button><button class="${mode === 'chords' ? 'on' : ''}" data-mode="chords"${hasC ? '' : ' disabled title="Esta canción todavía no tiene acordes"'}>Cifrado</button><button class="${mode === 'nash' ? 'on' : ''}" data-mode="nash"${hasC ? '' : ' disabled'}>Números</button><button class="${mode === 'latin' ? 'on' : ''}" data-mode="latin"${hasC ? '' : ' disabled'} title="Acordes en Do, Re, Mi">Do Re Mi</button></div>
       ${mode !== 'lyrics' && hasC ? `<div class="tr" aria-label="Transponer"><button data-semi="-1" aria-label="Bajar medio tono">−</button><span>${esc(key || '—')}</span><button data-semi="1" aria-label="Subir medio tono">+</button></div>${sh.semi ? `<button class="btn small ghost" data-semi="0">Tono original</button>` : ''}` : ''}
-      <button class="btn small ghost" data-big>${sh.big ? 'A−' : 'A+'}</button><button class="btn small ghost" data-export="${s.id}">${ic("dl")}Exportar</button></div>
+      <button class="btn small ghost" data-big>${sh.big ? 'A−' : 'A+'}</button><button class="btn small ghost" data-export="${s.id}">${ic("dl")}Exportar</button><button class="btn small ghost" data-webchords="${s.id}">Ver cifrado en internet</button></div>
     <article class="chart${mode === 'lyrics' ? ' lyr' : ''}${sh.big ? ' big' : ''}">${renderChart(s.chart, { key: baseKey, semi: sh.semi, nash: mode === 'nash', latin: mode === 'latin' })}</article>
     ${!hasC ? `<p class="hint">${s.chart ? 'Tiene letra pero no acordes.' : 'Todavía no tiene letra ni acordes.'} Toca «Editar» y pega el cifrado: sirve el de cualquier página (acordes arriba de la letra) o el formato [G]palabra.</p>` : ''}</div>`;
 }
@@ -2443,7 +2489,7 @@ function editSong(id, after) {
           <div class="etr"><span class="etl">Acorde</span><div class="cbar" id="sCk" aria-label="Acordes del tono"></div></div>
         </div>
         <div class="ebody"><textarea class="in chartin" id="sC" spellcheck="false" placeholder="Toca una sección para empezar y escribe la letra. Para un acorde, pon el cursor justo antes de la sílaba y toca el acorde.&#10;&#10;[Verso 1]&#10;[G]Cuando sale el [D]sol…">${esc(s.chart || '')}</textarea><div class="cprev" id="sPrev" hidden></div></div>
-        <div class="efoot"><button type="button" class="btn small primary" id="sAud">${ic('audio')}Sacar acordes del audio</button><input type="file" id="sAudF" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado</button><button type="button" class="btn small ghost" id="sImp">Importar archivo</button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,.usr,text/plain" hidden><button type="button" class="btn small ghost" id="sGo">Buscar cifrado en internet</button><button type="button" class="btn small ghost" id="sAI">${ic('spark')}Revisar con IA</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
+        <div class="efoot"><button type="button" class="btn small primary" id="sAud">${ic('audio')}Sacar acordes del audio</button><input type="file" id="sAudF" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado</button><button type="button" class="btn small ghost" id="sImp">Importar archivo</button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,.usr,text/plain" hidden><button type="button" class="btn small ghost" id="sGo">Buscar cifrado en internet</button><button type="button" class="btn small ghost" id="sAI">${ic('spark')}Revisar con IA</button><button type="button" class="btn small ghost" id="sSecAI">${ic('spark')}Nombrar secciones</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
       </div></div></div>
     <div class="links">${id && isDir() ? `<button class="btn ghost danger" data-del>${ic('trash')}Eliminar</button>` : ''}<span style="flex:1"></span><button class="btn primary" id="sSave">Guardar</button></div>`, (w, close) => {
     const ta = $('#sC', w);
@@ -2481,7 +2527,11 @@ function editSong(id, after) {
     let pvT; ta.addEventListener('input', () => { clearTimeout(pvT); pvT = setTimeout(prev, 250); });
     if (matchMedia('(min-width:1000px)').matches) $('#sPrevT', w).click();
     // pegar un cifrado copiado de otra página (acordes arriba, letra abajo)
-    $('#sPaste', w).onclick = () => modal(`${ph('Pegar cifrado')}
+    $('#sPaste', w).onclick = async () => { let clip = ''; try { clip = navigator.clipboard && navigator.clipboard.readText ? await navigator.clipboard.readText() : ''; } catch (e) {}
+      if (clip && clip.trim().length > 30 && (looksChordsOver(clip) || /\[[A-G][^\]]*\]/.test(clip))) { let v = looksChordsOver(clip) ? fromChordsOver(clip.replace(/\r/g, '')) : clip; v = v.replace(/\n{3,}/g, '\n\n').trim();
+        if (!ta.value.trim() || confirm('¿Cambio lo que hay en el editor por el cifrado que copiaste?')) { ta.value = v; ta.dispatchEvent(new Event('input')); $('#sCh', w).textContent = 'Pegué el cifrado que copiaste y lo acomodé. Revisa con la vista previa.'; if (pv.hidden) $('#sPrevT', w).click(); return; } }
+      pasteModal(); };
+    const pasteModal = () => modal(`${ph('Pegar cifrado')}
       <p class="hint" style="margin-top:0">1. Abre la canción en la página de cifrados que uses, en otra pestaña.<br>2. Selecciona desde el primer acorde hasta el final y cópialo.<br>3. Pégalo aquí: lo acomodo con las secciones y los acordes en su sílaba.</p>
       <textarea class="in chartin" id="pzT" spellcheck="false" placeholder="Pega aquí el cifrado…"></textarea>
       <div class="links"><label class="sw"><input type="checkbox" id="pzRep"${ta.value.trim() ? '' : ' checked'}> Reemplazar lo que ya hay</label><span style="flex:1"></span><button class="btn primary" id="pzGo">Acomodar</button></div>`, (w2, close2) => {
@@ -2570,6 +2620,7 @@ function bind(m) {
   on('[data-viewphoto]', e => viewPhoto(e.dataset.viewphoto));
   $$('[data-photo]', m).forEach(inp => inp.onchange = async () => { const f = inp.files && inp.files[0]; if (!f) return; try { const photo = await photoData(f); const who = Object.assign({}, mem(inp.dataset.photo)); who.photo = photo; await DB.saveMember(who); toast('Foto actualizada.'); await reload(); } catch (x) { toast(x.message, 4000); } });
   on('[data-nophoto]', async e => { const who = Object.assign({}, mem(e.dataset.nophoto), { photo: '' }); await DB.saveMember(who); await reload(); });
+  on('[data-webchords]', e => { const so = song(e.dataset.webchords); openChordSources(so.title, so.artist || ''); });
   on('[data-listen]', e => openPlaylist(e.dataset.listen));
   on('[data-export]', e => openExport(song(e.dataset.export)));
   on('[data-mode]', e => { ST.sheet.mode = e.dataset.mode; render(); });
