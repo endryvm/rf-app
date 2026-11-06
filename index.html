@@ -1381,10 +1381,36 @@ function parseLRC(txt) {
   });
   return { ...meta, chart: lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() };
 }
+// SongSelect (CCLI): archivo .usr (letra por secciones) y texto exportado; se quita el pie de licencia y se guarda aparte
+const SS_SEC = { verse: 'Verso', chorus: 'Coro', bridge: 'Puente', 'pre-chorus': 'Pre-coro', prechorus: 'Pre-coro', intro: 'Intro', ending: 'Final', outro: 'Final', tag: 'Tag', interlude: 'Interludio', instrumental: 'Instrumental', vamp: 'Vamp', misc: 'Otro', estrofa: 'Verso', coro: 'Coro', puente: 'Puente' };
+const ssSec = n => { const m = /^\s*(pre-?chorus|verse|chorus|bridge|intro|ending|outro|tag|interlude|instrumental|vamp|misc|verso|estrofa|coro|puente|pre-?coro|final)\s*(\d*)\s*$/i.exec(n || ''); if (!m) return null; const k = m[1].toLowerCase(); return (SS_SEC[k] || SS_SEC[k.replace('-', '')] || (k[0].toUpperCase() + k.slice(1))) + (m[2] ? ' ' + m[2] : ''); };
+const CCLI_FOOT = /^\s*(ccli (song|license)\s*#|©|\(c\)|copyright|for use solely with the songselect|songselect|all rights reserved|todos los derechos|admin\.|used by permission)/i;
+function parseUSR(txt) {
+  const g = k => { const m = new RegExp('^' + k + '=(.*)$', 'mi').exec(txt); return m ? m[1].trim() : ''; };
+  const fields = g('Fields').split('/t'), words = g('Words').split('/t'), out = [];
+  fields.forEach((f, i) => { if (!words[i]) return; out.push(`[${ssSec(f) || f}]`, words[i].split('/n').map(x => x.trim()).join('\n'), ''); });
+  const keys = g('Keys').split('/t')[0];
+  return { title: g('Title'), artist: g('Author').replace(/\s*\|\s*/g, ', '), key: keys, chart: out.join('\n').trim(), ccli: { song: (/\[S A?(\d+)\]/.exec(txt) || [])[1] || '', copyright: g('Copyright').replace(/\s*\|\s*/g, ', ') } };
+}
+function parseSongSelectText(txt) {
+  const lines = String(txt || '').replace(/\r/g, '').split('\n'), out = [], foot = []; let title = '';
+  let inFoot = false;
+  lines.forEach((l, i) => { const t = l.trim();
+    if (inFoot || CCLI_FOOT.test(t)) { inFoot = true; if (t) foot.push(t); return; }
+    if (!title && t && !ssSec(t) && !out.length) { title = t; return; }
+    const sec = ssSec(t); if (sec) { if (out.length && out[out.length - 1] !== '') out.push(''); out.push(`[${sec}]`); return; }
+    out.push(l.replace(/\s+$/, ''));
+  });
+  let chart = out.join('\n').replace(/\n{3,}/g, '\n\n').trim(); if (looksChordsOver(chart)) chart = fromChordsOver(chart);
+  const num = (/CCLI Song #\s*(\d+)/i.exec(foot.join(' ')) || [])[1] || '';
+  return { title, chart, ccli: { song: num, copyright: foot.filter(f => !/CCLI|songselect/i.test(f)).join(' ') } };
+}
 function importSongFile(name, text) {
   const ext = (/\.([a-z0-9]+)$/i.exec(name || '') || [])[1] || '';
+  if (/^usr$/i.test(ext) || /^Type=SongSelect/mi.test(text) || /^\[File\]/m.test(text)) return { ...parseUSR(text), from: 'SongSelect (CCLI)' };
   if (/^(cho|chordpro|chopro|crd|pro|chord)$/i.test(ext) || /\{\s*(title|t|start_of_chorus|soc|key)\s*[:}]/i.test(text)) return { ...parseChordPro(text), from: 'ChordPro' };
   if (/^lrc$/i.test(ext) || /^\s*\[\d{1,2}:\d{2}/m.test(text)) return { ...parseLRC(text), from: 'LRC' };
+  if (/CCLI (Song|License) #|SongSelect/i.test(text) || /^\s*(Verse|Chorus|Bridge)\s*\d*\s*$/mi.test(text)) return { ...parseSongSelectText(text), from: 'SongSelect (CCLI)' };
   let chart = String(text || '').replace(/\r/g, '').trim(); if (looksChordsOver(chart)) chart = fromChordsOver(chart);
   return { chart, from: 'texto' };
 }
@@ -1673,6 +1699,7 @@ function studioBind(s, w, ta, h) {
     const r = importSongFile(f.name, await f.text());
     if (r.title && !$('#sT', w).value.trim()) $('#sT', w).value = r.title; if (r.artist && !$('#sA', w).value.trim()) $('#sA', w).value = r.artist;
     const sel = $('#sK', w), k = keyOpt(sel, r.key); if (k && !sel.value) { sel.value = k; h.kc(); } if (r.bpm && !$('#sB', w).value) { $('#sB', w).value = r.bpm; h.tg(); }
+    if (r.ccli && (r.ccli.song || r.ccli.copyright)) s.meta = Object.assign({}, s.meta, { ccli: r.ccli });
     if (r.chart && putChart(r.chart, 'lo del archivo')) msg(`Importado desde ${r.from}. Revisa con la vista previa.`); };
 
   // 5) revisar el cifrado con IA
@@ -2370,7 +2397,7 @@ function editSong(id, after) {
           <div class="etr"><span class="etl">Acorde</span><div class="cbar" id="sCk" aria-label="Acordes del tono"></div></div>
         </div>
         <div class="ebody"><textarea class="in chartin" id="sC" spellcheck="false" placeholder="Toca una sección para empezar y escribe la letra. Para un acorde, pon el cursor justo antes de la sílaba y toca el acorde.&#10;&#10;[Verso 1]&#10;[G]Cuando sale el [D]sol…">${esc(s.chart || '')}</textarea><div class="cprev" id="sPrev" hidden></div></div>
-        <div class="efoot"><button type="button" class="btn small primary" id="sAud">${ic('audio')}Sacar acordes del audio</button><input type="file" id="sAudF" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado</button><button type="button" class="btn small ghost" id="sImp">Importar archivo</button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,text/plain" hidden><button type="button" class="btn small ghost" id="sGo">Buscar cifrado en internet</button><button type="button" class="btn small ghost" id="sAI">${ic('spark')}Revisar con IA</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
+        <div class="efoot"><button type="button" class="btn small primary" id="sAud">${ic('audio')}Sacar acordes del audio</button><input type="file" id="sAudF" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado</button><button type="button" class="btn small ghost" id="sImp">Importar archivo</button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,.usr,text/plain" hidden><button type="button" class="btn small ghost" id="sGo">Buscar cifrado en internet</button><button type="button" class="btn small ghost" id="sAI">${ic('spark')}Revisar con IA</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
       </div></div></div>
     <div class="links">${id && isDir() ? `<button class="btn ghost danger" data-del>${ic('trash')}Eliminar</button>` : ''}<span style="flex:1"></span><button class="btn primary" id="sSave">Guardar</button></div>`, (w, close) => {
     const ta = $('#sC', w);
