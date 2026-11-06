@@ -711,6 +711,38 @@ textarea.chartin{min-height:240px;font-family:ui-monospace,SFMono-Regular,Menlo,
 html{touch-action:manipulation;-webkit-text-size-adjust:100%}
 @media (pointer:coarse){input.in,select.in,textarea.in,.search input{font-size:16px}}
 
+/* ===== Chord Studio ===== */
+.sfind{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px 14px;margin:0 0 12px;border-radius:14px;border:1.5px dashed var(--line);background:var(--card);color:var(--fg);cursor:pointer;font:inherit}
+.sfind:hover{border-color:var(--fg)}
+.sfind svg{width:22px;height:22px;flex:none}
+.sfind span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sfind small,.smeta small{color:var(--muted);font-size:12.5px}
+.smeta:empty{display:none}
+.smeta{display:flex;gap:12px;align-items:center;margin:-4px 0 12px;padding:10px;border-radius:12px;background:var(--card)}
+.smeta img{width:54px;height:54px;border-radius:8px;object-fit:cover;flex:none}
+.smeta span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ssr{display:flex;flex-direction:column;gap:6px;max-height:56vh;overflow:auto}
+.ssi{display:flex;gap:12px;align-items:center;text-align:left;padding:8px;border-radius:12px;border:1px solid var(--line);background:none;color:var(--fg);font:inherit;cursor:pointer}
+.ssi:hover{background:var(--card)}
+.ssi img,.ssi .ssc{width:48px;height:48px;border-radius:8px;object-fit:cover;flex:none;background:var(--card)}
+.ssi .tx{display:flex;flex-direction:column;gap:1px;min-width:0}
+.ssi small{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--fg);border-radius:50%;animation:rfspin .8s linear infinite;margin-right:8px;vertical-align:-2px}
+@keyframes rfspin{to{transform:rotate(360deg)}}
+.efoot{flex-wrap:wrap;row-gap:8px}
+.efoot #sCh{flex-basis:100%;order:9}
+@media print{
+  body.printing *{visibility:hidden}
+  body.printing .chart,body.printing .chart *,body.printing .sheet-top h1,body.printing .sheet-top .eyebrow{visibility:visible}
+  body.printing .tabbar,body.printing .mhead,body.printing .rail,body.printing .tools{display:none!important}
+  body.printing .chart{color:#000;columns:2;font-size:12pt}
+}
+.panel.xl .sedit-f .sfind{grid-column:1/-1}
+.panel.xl .sedit-f:has(.smeta:not(:empty)) .sfind{grid-column:span 2}
+.panel.xl .sedit-f .smeta{grid-column:span 2;margin:0 0 12px}
+.sfind b{font-size:15px;color:var(--fg);display:block}
+.sfind svg{stroke:currentColor;fill:none;stroke-width:2}
+
 </style>
 <div id="root"></div>
 <script>
@@ -773,7 +805,7 @@ const chartLyrics = text => parseChart(text).map(b => b.type === 'sec' ? `[${b.n
 const SEC_COLORS = n => { const k = String(n).toLowerCase(); return k.startsWith('coro') || k.startsWith('chorus') ? '#E9C47A' : k.startsWith('pre') ? '#4FC7A3' : k.startsWith('puente') || k.startsWith('bridge') ? '#B48BF0' : k.startsWith('verso') || k.startsWith('verse') ? '#7AA7FF' : '#9AA3C0'; };
 function renderChart(text, o) {
   o = o || {}; const semi = o.semi || 0, flats = useFlats(transKey(o.key, semi)), key = transKey(o.key, semi);
-  const show = c => o.nash ? nashville(transChord(c, semi, flats), key) : transChord(c, semi, flats);
+  const show = c => o.nash ? nashville(transChord(c, semi, flats), key) : o.latin && typeof latinChord === 'function' ? latinChord(transChord(c, semi, flats)) : transChord(c, semi, flats);
   let html = '', li = 0;
   parseChart(text).forEach(b => {
     if (b.type === 'sec') html += `<div class="sec" style="--c:${SEC_COLORS(b.name)}"><b>${esc(b.name)}</b></div>`;
@@ -958,7 +990,11 @@ const SupaDB = (cfg) => {
     async saveMember(m) { const row = { name: m.name, email: (m.email || '').toLowerCase(), phone: m.phone || '', roles: m.roles || [], is_director: !!m.is_director, color: m.color || COLORS[0], mix_bus: +m.mix_bus || 0, photo: m.photo || '' }; if (m.id) await q(sb.from('members').update(row).eq('id', m.id)); else m.id = (await q(sb.from('members').insert(row).select('id').single())).id; if (meRow && m.id === meRow.id) await this.refreshMe(); return m; },
     async deleteMember(id) { await q(sb.from('members').delete().eq('id', id)); },
     async songs() { return q(sb.from('songs').select('*').order('title')); },
-    async saveSong(s) { const row = { title: s.title, artist: s.artist || '', key: s.key || '', bpm: s.bpm || null, meter: s.meter || 4, youtube: s.youtube || '', spotify: s.spotify || '', chart: s.chart || '', tags: s.tags || [] }; if (s.id) { await q(sb.from('songs').update(row).eq('id', s.id)); return s; } return q(sb.from('songs').insert(row).select('*').single()); },
+    async saveSong(s) { const row = { title: s.title, artist: s.artist || '', key: s.key || '', bpm: s.bpm || null, meter: s.meter || 4, youtube: s.youtube || '', spotify: s.spotify || '', chart: s.chart || '', tags: s.tags || [] };
+      // meta (portada, álbum, letra con tiempos) y analysis (acordes del audio); si la base aún no tiene esas columnas, guarda lo demás
+      const full = Object.assign({}, row, { meta: s.meta || null, analysis: s.analysis || null });
+      const run = r => s.id ? q(sb.from('songs').update(r).eq('id', s.id)).then(() => s) : q(sb.from('songs').insert(r).select('*').single());
+      try { return await run(full); } catch (e) { if (!/meta|analysis|column/i.test(String(e && e.message || e))) throw e; return run(row); } },
     async deleteSong(id) { await q(sb.from('songs').delete().eq('id', id)); },
     async services() { return (await q(sb.from('services').select('*, team:assignments(*), songs:service_songs(*)').order('date'))).map(svcOut); },
     async saveService(sv) { const row = { date: sv.date, time: sv.time || '', name: sv.name || 'Servicio', notes: sv.notes || '', rehearsal_at: sv.rehearsal_at || null, rehearsal_place: sv.rehearsal_place || '', rehearsal_notes: sv.rehearsal_notes || '', choose_by: sv.choose_by || null }; if (sv.id) { await q(sb.from('services').update(row).eq('id', sv.id)); return sv; } return q(sb.from('services').insert(row).select('*').single()); },
@@ -1266,6 +1302,356 @@ function mixEditGroup(gi) {
   });
 }
 
+/* ================= Chord Studio: importar/exportar, buscar la canción, sacar acordes de un audio ================= */
+
+/* ---------- notación latina (Do Re Mi) ---------- */
+const LATIN = { C: 'Do', D: 'Re', E: 'Mi', F: 'Fa', G: 'Sol', A: 'La', B: 'Si' };
+const latinNote = n => n ? (LATIN[n[0]] || n[0]) + n.slice(1) : n;
+function latinChord(ch) { const m = CHORD_RE.exec(ch); if (!m) return ch; return latinNote(m[1]) + (m[2] || '') + (m[3] ? '/' + latinNote(m[3]) : ''); }
+
+/* ---------- ChordPro, TXT y LRC → [G]palabra ---------- */
+const CP_SEC = { verse: 'Verso', v: 'Verso', chorus: 'Coro', c: 'Coro', bridge: 'Puente', b: 'Puente', prechorus: 'Pre-coro', 'pre-chorus': 'Pre-coro', intro: 'Intro', outro: 'Final', ending: 'Final', instrumental: 'Instrumental', interlude: 'Interludio', tag: 'Tag', vamp: 'Vamp', grid: 'Instrumental', tab: 'Instrumental' };
+const secEs = name => { const m = /^\s*(pre[- ]?chorus|verse|chorus|bridge|intro|outro|ending|instrumental|interlude|tag|vamp)\s*(\d*)\s*:?\s*$/i.exec(name || ''); if (!m) return (name || '').trim(); const base = CP_SEC[m[1].toLowerCase().replace(/[ ]/, '-').replace('pre-chorus', 'pre-chorus')] || CP_SEC[m[1].toLowerCase().replace(/[- ]/g, '')] || m[1]; return base + (m[2] ? ' ' + m[2] : ''); };
+function parseChordPro(txt) {
+  const meta = {}, out = []; let pendingEnv = null;
+  String(txt || '').replace(/\r/g, '').split('\n').forEach(raw => {
+    const l = raw.replace(/\s+$/, '');
+    const d = /^\s*\{\s*([a-z_]+)\s*(?::\s*(.*?))?\s*\}\s*$/i.exec(l);
+    if (d) {
+      const k = d[1].toLowerCase(), v = (d[2] || '').trim();
+      if (k === 'title' || k === 't') meta.title = v;
+      else if (k === 'subtitle' || k === 'st' || k === 'artist') meta.artist = meta.artist || v;
+      else if (k === 'key') meta.key = v;
+      else if (k === 'tempo') meta.bpm = parseInt(v) || null;
+      else if (k === 'time') meta.meter = parseInt(v) || null;
+      else if (k === 'capo') meta.capo = v;
+      else if (/^(comment|c|comment_italic|ci|comment_box|cb|section)$/.test(k) && v) { out.push(SEC_RE.test(v) || /^(verse|chorus|bridge|pre|intro|outro|ending|instrumental|interlude|tag|vamp)/i.test(v) ? `[${secEs(v)}]` : `{${v}}`); }
+      else if (/^(start_of_|so)([a-z]+)$/.test(k)) { const t = k.replace(/^start_of_|^so/, ''); const name = v || CP_SEC[t] || ''; if (name) out.push(`[${secEs(name)}]`); pendingEnv = t; }
+      else if (/^(end_of_|eo)/.test(k)) { pendingEnv = null; if (out.length && out[out.length - 1] !== '') out.push(''); }
+      return;
+    }
+    if (/^\s*#/.test(l)) return; // comentarios del archivo
+    out.push(l);
+  });
+  let chart = out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (looksChordsOver(chart)) chart = fromChordsOver(chart);
+  return { ...meta, chart };
+}
+function parseLRC(txt) {
+  const meta = {}, lines = [];
+  String(txt || '').replace(/\r/g, '').split('\n').forEach(l => {
+    const t = /^\s*\[(ti|ar|al|length|by|offset|re|ve):(.*)\]\s*$/i.exec(l); if (t) { if (/^ti$/i.test(t[1])) meta.title = t[2].trim(); if (/^ar$/i.test(t[1])) meta.artist = t[2].trim(); return; }
+    const s = l.replace(/\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]/g, '').replace(/<\d{1,2}:\d{2}(?:[.:]\d{1,3})?>/g, '').trim();
+    if (/\[\d{1,2}:\d{2}/.test(l) || s) lines.push(s);
+  });
+  return { ...meta, chart: lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() };
+}
+function importSongFile(name, text) {
+  const ext = (/\.([a-z0-9]+)$/i.exec(name || '') || [])[1] || '';
+  if (/^(cho|chordpro|chopro|crd|pro|chord)$/i.test(ext) || /\{\s*(title|t|start_of_chorus|soc|key)\s*[:}]/i.test(text)) return { ...parseChordPro(text), from: 'ChordPro' };
+  if (/^lrc$/i.test(ext) || /^\s*\[\d{1,2}:\d{2}/m.test(text)) return { ...parseLRC(text), from: 'LRC' };
+  let chart = String(text || '').replace(/\r/g, '').trim(); if (looksChordsOver(chart)) chart = fromChordsOver(chart);
+  return { chart, from: 'texto' };
+}
+
+/* ---------- [G]palabra → ChordPro / texto con acordes arriba ---------- */
+function toChordPro(s, semi = 0) {
+  const flats = useFlats(transKey(s.key, semi)), head = [`{title: ${s.title}}`];
+  if (s.artist) head.push(`{artist: ${s.artist}}`); if (s.key) head.push(`{key: ${transKey(s.key, semi)}}`); if (s.bpm) head.push(`{tempo: ${s.bpm}}`); if (s.meter && s.meter !== 4) head.push(`{time: ${s.meter}/4}`);
+  const body = String(s.chart || '').split('\n').map(l => { const sec = /^\s*\[([^\]]+)\]\s*$/.exec(l); if (sec && !isChord(sec[1])) return `{comment: ${sec[1].trim()}}`; return l.replace(/\[([^\]]+)\]/g, (m, c) => isChord(c) ? `[${transChord(c.trim(), semi, flats)}]` : m); }).join('\n');
+  return head.join('\n') + '\n\n' + body.trim() + '\n';
+}
+function toChordsOver(chart, semi = 0, key = '', latin = false) {
+  const flats = useFlats(transKey(key, semi)), show = c => { const t = transChord(c, semi, flats); return latin ? latinChord(t) : t; };
+  return String(chart || '').split('\n').map(l => {
+    const sec = /^\s*\[([^\]]+)\]\s*$/.exec(l); if (sec && !isChord(sec[1])) return '\n' + sec[1].trim().toUpperCase();
+    if (!/\[[^\]]+\]/.test(l)) return l;
+    let top = '', bot = '', i = 0; const re = /\[([^\]]+)\]/g; let m;
+    while ((m = re.exec(l))) { const txt = l.slice(i, m.index); bot += txt; if (!isChord(m[1])) { bot += m[0]; i = re.lastIndex; continue; } if (top.length < bot.length) top += ' '.repeat(bot.length - top.length); else if (top.length > bot.length && top) { bot += ' '.repeat(top.length - bot.length); } top += show(m[1].trim()) + ' '; i = re.lastIndex; }
+    bot += l.slice(i); return bot.trim() ? top.replace(/\s+$/, '') + '\n' + bot : top.replace(/\s+$/, '');
+  }).join('\n').replace(/^\n+/, '').replace(/\n{3,}/g, '\n\n');
+}
+function downloadText(name, text, mime = 'text/plain') {
+  const b = new Blob([text], { type: mime + ';charset=utf-8' }), u = URL.createObjectURL(b), a = document.createElement('a');
+  a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000);
+}
+const fileSafe = t => String(t || 'cancion').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80);
+function exportSong(s, how) {
+  const sh = ST.sheet || {}, semi = sh.semi || 0, base = sh.key || s.key;
+  if (how === 'cho') return downloadText(fileSafe(s.title) + '.cho', toChordPro(Object.assign({}, s, { key: base }), semi));
+  if (how === 'txt') { const k = transKey(base, semi); return downloadText(fileSafe(s.title) + '.txt', `${s.title}${s.artist ? ' — ' + s.artist : ''}\n${k ? 'Tono: ' + k : ''}${s.bpm ? '   Tempo: ' + s.bpm : ''}\n\n` + toChordsOver(s.chart, semi, base, sh.mode === 'latin')); }
+  if (how === 'pdf') { document.body.classList.add('printing'); setTimeout(() => { window.print(); setTimeout(() => document.body.classList.remove('printing'), 500); }, 50); }
+}
+
+/* ---------- buscar la canción (iTunes y MusicBrainz: solo datos, nunca letras) ---------- */
+function itunesSearch(q) {
+  return new Promise(res => {
+    const cb = 'rfit' + Date.now() + Math.floor(Math.random() * 1e4), s = document.createElement('script'); let done = false;
+    const end = r => { if (done) return; done = true; try { delete window[cb]; } catch (e) { window[cb] = undefined; } s.remove(); res(r); };
+    window[cb] = d => end(((d && d.results) || []).filter(x => x.kind === 'song').map(x => ({ src: 'Apple Music', title: x.trackName, artist: x.artistName, album: x.collectionName, year: (x.releaseDate || '').slice(0, 4), dur: x.trackTimeMillis ? Math.round(x.trackTimeMillis / 1000) : 0, cover: (x.artworkUrl100 || '').replace('100x100', '300x300'), url: x.trackViewUrl, isrc: '' })));
+    s.src = `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=song&limit=12&country=US&callback=${cb}`; s.onerror = () => end([]);
+    document.head.appendChild(s); setTimeout(() => end([]), 8000);
+  });
+}
+async function mbSearch(q) {
+  try {
+    const r = await fetch(`https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(q)}&fmt=json&limit=10`, { headers: { Accept: 'application/json' } });
+    const d = await r.json();
+    return (d.recordings || []).map(x => { const rel = (x.releases || [])[0] || {}; return { src: 'MusicBrainz', title: x.title, artist: (x['artist-credit'] || []).map(a => a.name + (a.joinphrase || '')).join(''), album: rel.title || '', year: (x['first-release-date'] || rel.date || '').slice(0, 4), dur: x.length ? Math.round(x.length / 1000) : 0, cover: rel.id ? `https://coverartarchive.org/release/${rel.id}/front-250` : '', url: `https://musicbrainz.org/recording/${x.id}`, mbid: x.id, isrc: (x.isrcs || [])[0] || '' }; });
+  } catch (e) { return []; }
+}
+async function searchSongs(q) {
+  const [a, b] = await Promise.all([itunesSearch(q), mbSearch(q)]);
+  const seen = new Set(), key = r => (r.title + '|' + r.artist).toLowerCase().replace(/[^a-z0-9áéíóúñü|]/g, '');
+  return [...a, ...b].filter(r => r.title && !seen.has(key(r)) && seen.add(key(r)));
+}
+const mmss = s => s ? Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0') : '';
+// ventana para escoger la versión correcta; al escoger llena el formulario de la canción
+function openSongSearch(q0, pick) {
+  modal(`${ph('Buscar la canción')}
+    <label class="search">${ic('search')}<input id="ssQ" placeholder="Nombre, artista o álbum" value="${esc(q0 || '')}" autocomplete="off"></label>
+    <p class="hint" style="margin:8px 0 12px">Trae el nombre exacto, artista, álbum, año y portada desde Apple Music y MusicBrainz. La letra y el cifrado no vienen de ahí: los pegas, los importas o los sacas del audio.</p>
+    <div id="ssR" class="ssr"></div>`, (w, close) => {
+    const inp = $('#ssQ', w), out = $('#ssR', w); let t, n = 0;
+    const go = async () => { const q = inp.value.trim(); if (q.length < 2) { out.innerHTML = ''; return; } const my = ++n; out.innerHTML = '<div class="empty"><span class="spin"></span>Buscando…</div>';
+      const r = await searchSongs(q); if (my !== n) return;
+      out.innerHTML = r.length ? r.map((x, i) => `<button type="button" class="ssi" data-i="${i}">${x.cover ? `<img src="${esc(x.cover)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'ssc'}))">` : '<span class="ssc"></span>'}
+        <span class="tx"><b>${esc(x.title)}</b><small>${esc(x.artist)}${x.album ? ' · ' + esc(x.album) : ''}</small><small>${[x.year, mmss(x.dur), x.src].filter(Boolean).join(' · ')}</small></span></button>`).join('') : '<div class="empty">No apareció. Revisa cómo se escribe o búscala solo por el nombre.</div>';
+      $$('.ssi', out).forEach(b => b.onclick = () => { pick(r[+b.dataset.i]); close(); });
+    };
+    inp.addEventListener('input', () => { clearTimeout(t); t = setTimeout(go, 450); }); setTimeout(() => inp.focus(), 50); if (q0) go();
+  });
+}
+
+/* ---------- sacar acordes de un audio: corre en la computadora (Essentia.js, sin servidor) ---------- */
+const ESS_CDN = 'https://cdn.jsdelivr.net/npm/essentia.js@0.1.3/dist/';
+const AN_WORKER = `
+self.exports = {}; self.Module = { onRuntimeInitialized() { self._ready = true; } };
+let E = null;
+function boot() { if (E) return; importScripts(self._cdn + 'essentia-wasm.umd.js', self._cdn + 'essentia.js-core.umd.js'); }
+function wait() { return new Promise(r => { const t = () => (self._ready || (self.Module && self.Module.calledRun)) ? r() : setTimeout(t, 50); t(); }); }
+onmessage = async ev => {
+  const { cdn, pcm, sr } = ev.data; self._cdn = cdn;
+  try {
+    postMessage({ p: 0.03, msg: 'Preparando el analizador…' }); boot(); await wait();
+    E = E || new Essentia(self.exports.EssentiaWASM || self.Module);
+    const frame = 8192, hop = 2048, hp = [];
+    const fr = E.FrameGenerator(pcm, frame, hop), n = fr.size();
+    for (let i = 0; i < n; i++) {
+      const w = E.Windowing(fr.get(i), true, frame, 'blackmanharris62'), sp = E.Spectrum(w.frame, frame);
+      const pk = E.SpectralPeaks(sp.spectrum, 0.00001, 5000, 100, 40, 'frequency', sr);
+      hp.push(E.vectorToArray(E.HPCP(pk.frequencies, pk.magnitudes, true, 500, 0, 5000, false, 40, false, 'unitMax', 440, sr, 12, 'squaredCosine', 1).hpcp));
+      if (i % 200 === 0) postMessage({ p: 0.05 + 0.6 * i / n, msg: 'Escuchando la armonía…' });
+    }
+    const vv = new E.module.VectorVectorFloat(); hp.forEach(a => vv.push_back(E.arrayToVector(a)));
+    const cd = E.ChordsDetection(vv, hop, sr, 2), chords = [];
+    for (let i = 0; i < cd.chords.size(); i++) chords.push(cd.chords.get(i));
+    const strength = Array.from(E.vectorToArray(cd.strength));
+    postMessage({ p: 0.7, msg: 'Buscando el tono…' });
+    const sig = E.arrayToVector(pcm), k = E.KeyExtractor(sig, true, 4096, 4096, 12, 3500, 60, 25, 0.2, 'bgate', sr);
+    postMessage({ p: 0.8, msg: 'Contando el tempo…' });
+    let bpm = 0, ticks = [];
+    try { const rx = E.RhythmExtractor2013(sig, 208, 'degara', 40); bpm = rx.bpm; ticks = Array.from(E.vectorToArray(rx.ticks)); } catch (e) {}
+    postMessage({ done: true, chords, strength, hopSec: hop / sr, key: k.key + (k.scale === 'minor' ? 'm' : ''), keyStrength: k.strength, bpm, ticks });
+  } catch (e) { postMessage({ error: String((e && e.message) || e) }); }
+};`;
+// une los cuadros por pulso: en cada pulso gana el acorde que más suena; los cambios quedan con su confianza
+function chordTimeline(r, dur) {
+  const fT = i => i * r.hopSec; let beats = r.ticks && r.ticks.length > 8 ? r.ticks.slice() : [];
+  if (!beats.length) { const step = r.bpm > 40 ? 60 / r.bpm : 0.5; for (let t = 0; t < dur; t += step) beats.push(t); }
+  if (beats[0] > 0.05) beats.unshift(0); beats.push(dur);
+  const per = []; let fi = 0;
+  for (let b = 0; b < beats.length - 1; b++) {
+    const t0 = beats[b], t1 = beats[b + 1], tally = {}; let tot = 0, cnt = 0;
+    while (fi < r.chords.length && fT(fi) < t1) { if (fT(fi) >= t0) { const c = r.chords[fi], s = Math.max(0.01, r.strength[fi] || 0); tally[c] = (tally[c] || 0) + s; tot += s; cnt++; } fi++; }
+    if (!cnt) { per.push({ t0, t1, ch: per.length ? per[per.length - 1].ch : 'N', conf: 0 }); continue; }
+    const [ch, w] = Object.entries(tally).sort((a, b) => b[1] - a[1])[0];
+    per.push({ t0, t1, ch, conf: Math.min(1, (w / tot) * Math.min(1, (tot / cnt) * 1.6)) });
+  }
+  // un pulso suelto entre dos iguales casi siempre es ruido
+  for (let i = 1; i < per.length - 1; i++) if (per[i].ch !== per[i - 1].ch && per[i - 1].ch === per[i + 1].ch && per[i].conf < 0.75) per[i].ch = per[i - 1].ch;
+  const segs = []; per.forEach(p => { const L = segs[segs.length - 1]; if (L && L.ch === p.ch) { L.t1 = p.t1; L.cs += p.conf; L.n++; } else segs.push({ t0: p.t0, t1: p.t1, ch: p.ch, cs: p.conf, n: 1 }); });
+  return segs.map(s => ({ t0: +s.t0.toFixed(2), t1: +s.t1.toFixed(2), ch: s.ch, conf: +(s.cs / s.n).toFixed(2), beats: s.n }));
+}
+async function decodeMono(file, onP) {
+  onP && onP(0.01, 'Abriendo el audio…');
+  const buf = await file.arrayBuffer(), AC = window.AudioContext || window.webkitAudioContext, ac = new AC();
+  const a = await new Promise((ok, ko) => { const p = ac.decodeAudioData(buf, ok, ko); if (p && p.then) p.then(ok, ko); }); try { ac.close(); } catch (e) {}
+  const sr = 44100, len = Math.ceil(a.duration * sr), off = new OfflineAudioContext(1, len, sr), s = off.createBufferSource(); s.buffer = a; s.connect(off.destination); s.start();
+  const r = await off.startRendering(); return { pcm: r.getChannelData(0), sr, dur: a.duration };
+}
+async function analyzeAudio(file, onP) {
+  if (file.size > 80 * 1024 * 1024) throw new Error('El archivo pasa de 80 MB. Usa un MP3 o una versión más corta.');
+  const { pcm, sr, dur } = await decodeMono(file, onP);
+  if (dur > 15 * 60) throw new Error('El audio dura más de 15 minutos. Corta solo la canción.');
+  const wk = new Worker(URL.createObjectURL(new Blob([AN_WORKER], { type: 'text/javascript' })));
+  const r = await new Promise((ok, ko) => { wk.onmessage = e => { const d = e.data; if (d.error) ko(new Error('No pude analizar el audio: ' + d.error)); else if (d.done) ok(d); else onP && onP(d.p, d.msg); }; wk.onerror = e => ko(new Error('No se pudo cargar el analizador (¿hay internet?).')); wk.postMessage({ cdn: ESS_CDN, pcm, sr }, [pcm.buffer]); });
+  wk.terminate();
+  const segs = chordTimeline(r, dur).filter(s => s.ch !== 'N');
+  const conf = segs.length ? segs.reduce((a, s) => a + s.conf * (s.t1 - s.t0), 0) / segs.reduce((a, s) => a + (s.t1 - s.t0), 0) : 0;
+  return { key: r.key, keyConf: +r.keyStrength.toFixed(2), bpm: r.bpm ? Math.round(r.bpm) : null, dur: +dur.toFixed(1), segs, conf: +conf.toFixed(2), beats: (r.ticks || []).map(t => +t.toFixed(2)), at: new Date().toISOString(), file: file.name };
+}
+// compases (4 pulsos) para leer la progresión de un vistazo
+function analysisBars(an, meter = 4) {
+  const beats = an.beats && an.beats.length > 8 ? an.beats : null; if (!beats) return [];
+  const at = t => { const s = an.segs.find(x => t >= x.t0 && t < x.t1); return s ? s.ch : ''; }, bars = [];
+  for (let i = 0; i + meter <= beats.length; i += meter) { const cs = []; for (let k = 0; k < meter; k++) cs.push(at(beats[i + k] + 0.05)); bars.push({ t: beats[i], cs }); }
+  return bars;
+}
+// texto «| G . . . | D . Em . |» con los acordes del análisis
+function barsText(bars, from = 0, n = 8) {
+  return bars.slice(from, from + n).map(b => '| ' + b.cs.map((c, i) => i && c === b.cs[i - 1] ? '.' : (c || '.')).join(' ') + ' ').join('') + '|';
+}
+
+/* ---------- letra gratis desde LRCLIB (base abierta, hecha para apps; la sube la comunidad) ---------- */
+const LRC_API = 'https://lrclib.net/api/';
+async function lrcFetch(path) { try { const r = await fetch(LRC_API + path); if (!r.ok) return null; return await r.json(); } catch (e) { return null; } }
+const normT = t => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\(.*?\)|\[.*?\]|-.*$/g, '').replace(/[^a-z0-9ñ ]/g, ' ').replace(/\s+/g, ' ').trim();
+async function findLyrics(title, artist, dur) {
+  const qs = (o) => Object.entries(o).filter(([, v]) => v).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');
+  let hit = artist ? await lrcFetch('get?' + qs({ track_name: title, artist_name: artist, duration: dur ? Math.round(dur) : '' })) : null;
+  if (!hit || (!hit.plainLyrics && !hit.syncedLyrics)) {
+    const list = await lrcFetch('search?' + qs({ track_name: title, artist_name: artist })) || await lrcFetch('search?' + qs({ q: title + ' ' + (artist || '') })) || [];
+    const nt = normT(title), na = normT(artist);
+    const score = x => (normT(x.trackName) === nt ? 4 : normT(x.trackName).includes(nt) ? 2 : 0) + (na && normT(x.artistName).includes(na.split(' ')[0]) ? 3 : 0) + (x.syncedLyrics ? 1 : 0) + (dur && x.duration && Math.abs(x.duration - dur) < 4 ? 2 : 0);
+    hit = (list || []).filter(x => x.plainLyrics || x.syncedLyrics).sort((a, b) => score(b) - score(a))[0];
+    if (hit && score(hit) < 4) hit = null;
+  }
+  if (!hit) return null;
+  return { plain: (hit.plainLyrics || '').trim(), synced: hit.syncedLyrics ? parseSynced(hit.syncedLyrics) : null, artist: hit.artistName, title: hit.trackName, dur: hit.duration };
+}
+function parseSynced(txt) {
+  const out = [];
+  String(txt).split('\n').forEach(l => { const m = /^\s*\[(\d{1,2}):(\d{2}(?:\.\d+)?)\]\s*(.*)$/.exec(l); if (m) out.push({ t: +m[1] * 60 + +m[2], text: m[3].replace(/<[^>]+>/g, '').trim() }); });
+  return out.length > 3 ? out : null;
+}
+// letra sola → estrofas (las líneas en blanco separan); la primera estrofa que se repite se marca como coro
+function lyricsToChart(plain) {
+  const st = String(plain || '').replace(/\r/g, '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
+  const cnt = {}; st.forEach(x => cnt[normT(x)] = (cnt[normT(x)] || 0) + 1);
+  let v = 0; return st.map(x => (cnt[normT(x)] > 1 ? '[Coro]' : `[Verso ${++v}]`) + '\n' + x).join('\n\n');
+}
+
+/* ---------- juntar los acordes del audio con la letra que trae tiempos ---------- */
+function chordAt(segs, t) { for (const s of segs) if (t >= s.t0 - 0.05 && t < s.t1) return s; return null; }
+function placeChords(text, changes, t0, t1, flats) {
+  // cada acorde va a la palabra que se canta en ese momento (proporcional dentro de la línea)
+  if (!text) return changes.map(c => `[${c.ch}]`).join(' ');
+  const starts = [0]; for (let i = 1; i < text.length; i++) if (text[i - 1] === ' ' && text[i] !== ' ') starts.push(i);
+  const at = {}; const span = Math.max(0.5, t1 - t0);
+  changes.forEach(c => { const want = Math.max(0, Math.min(1, (c.t - t0) / span)) * text.length; let best = 0; starts.forEach(p => { if (Math.abs(p - want) < Math.abs(best - want)) best = p; }); if (at[best] == null) at[best] = c.ch; else if (at[best] !== c.ch) { const nx = starts.find(p => p > best && at[p] == null); if (nx != null) at[nx] = c.ch; } });
+  let out = ''; for (let i = 0; i < text.length; i++) { if (at[i] != null) out += `[${at[i]}]`; out += text[i]; } return out;
+}
+function alignChart(synced, an, key) {
+  const flats = useFlats(key), nm = c => transChord(c, 0, flats), segs = an.segs.map(s => ({ ...s, ch: nm(s.ch) }));
+  const lines = synced, out = [], end = an.dur || (lines[lines.length - 1].t + 8);
+  const chordsIn = (a, b) => segs.filter(s => s.t1 > a && s.t0 < b);
+  const barLine = (a, b) => { const cs = chordsIn(a, b).filter(s => Math.min(b, s.t1) - Math.max(a, s.t0) > 0.6).map(s => s.ch); const ded = cs.filter((c, i) => c !== cs[i - 1]); return ded.length ? ded.map(c => `[${c}]`).join(' ') : ''; };
+  // intro: lo que suena antes de la primera línea
+  const f0 = lines.find(l => l.text); if (f0 && f0.t > 2) { const b = barLine(0, f0.t); if (b) out.push('[Intro]', b, ''); }
+  let v = 0, needHead = true;
+  const blockKeys = {}; // para detectar el coro (bloque que se repite)
+  // bloques: se separan por líneas vacías del LRC o por silencios largos
+  const blocks = []; let cur = [];
+  lines.forEach((l, i) => { const nx = lines[i + 1]; if (!l.text) { if (cur.length) blocks.push(cur), cur = []; return; } cur.push({ ...l, t1: nx ? nx.t : Math.min(end, l.t + 8) }); if (nx && nx.t - l.t > 7.5) { blocks.push(cur); cur = []; } });
+  if (cur.length) blocks.push(cur);
+  blocks.forEach(b => { const k = normT(b.map(x => x.text).join(' ')); blockKeys[k] = (blockKeys[k] || 0) + 1; });
+  blocks.forEach((b, bi) => {
+    const k = normT(b.map(x => x.text).join(' '));
+    out.push(blockKeys[k] > 1 ? '[Coro]' : `[Verso ${++v}]`);
+    b.forEach(l => {
+      const first = chordAt(segs, l.t + 0.1), ch = [];
+      if (first) ch.push({ t: l.t, ch: first.ch });
+      segs.forEach(s => { if (s.t0 > l.t + 0.25 && s.t0 < l.t1 - 0.5 && s.t1 - s.t0 > 0.45) ch.push({ t: s.t0, ch: s.ch }); });
+      const ded = ch.filter((c, i) => !i || c.ch !== ch[i - 1].ch);
+      out.push(placeChords(l.text, ded, l.t, l.t1, flats));
+    });
+    // instrumental entre bloques (más de 6 s sin cantar)
+    const nb = blocks[bi + 1], gapA = b[b.length - 1].t1, gapB = nb ? nb[0].t : end;
+    if (gapB - gapA > 4.5) { const bl = barLine(gapA, gapB); out.push(''); if (bl) out.push(nb ? '[Instrumental]' : '[Final]', bl); }
+    out.push('');
+  });
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+// sin letra con tiempos: la progresión por compases para tenerla a mano
+function progressionChart(an, key) {
+  const flats = useFlats(key), bars = analysisBars(an, 4); if (!bars.length) return an.segs.map(s => `[${transChord(s.ch, 0, flats)}]`).join(' ');
+  const rows = []; for (let i = 0; i < bars.length; i += 4) { const cs = bars.slice(i, i + 4).flatMap(b => b.cs).map(c => c && transChord(c, 0, flats)); const d = cs.filter((c, j) => c && c !== cs[j - 1]); if (d.length) rows.push(d.map(c => `[${c}]`).join(' ')); }
+  return '[Progresión del audio]\n' + rows.join('\n');
+}
+const searchChordsUrl = (t, a) => 'https://www.google.com/search?q=' + encodeURIComponent(`${t} ${a || ''} acordes`.trim());
+
+/* ---------- conectar Chord Studio con el editor de la canción ---------- */
+const ENH = { 'A#': 'Bb', 'D#': 'Eb', 'G#': 'Ab', Gb: 'F#', Db: 'C#', Cb: 'B', 'E#': 'F', 'B#': 'C', 'A#m': 'Bbm', 'D#m': 'Ebm', Abm: 'G#m', Gbm: 'F#m', Dbm: 'C#m' };
+function keyOpt(sel, k) { if (!k) return ''; const has = v => [...sel.options].some(o => o.value === v); return has(k) ? k : has(ENH[k]) ? ENH[k] : ''; }
+function studioBind(s, w, ta, h) {
+  const msg = t => { $('#sCh', w).textContent = t; }, refresh = () => { ta.dispatchEvent(new Event('input')); h.prev(); };
+  const meta = () => { const m = s.meta || {}, el = $('#sMeta', w);
+    el.innerHTML = m.title ? `${m.cover ? `<img src="${esc(m.cover)}" alt="" onerror="this.remove()">` : ''}<span><b>${esc(m.title)}</b><small>${[m.artist, m.album, m.year, mmss(m.dur)].filter(Boolean).map(esc).join(' · ')}</small><small>${m.lyrics === 'synced' ? '✓ Letra con tiempos: los acordes del audio caen solos en su sitio' : m.lyrics === 'plain' ? '✓ Letra encontrada (sin tiempos)' : m.lyrics === 'none' ? 'No apareció la letra en la base abierta' : ''}</small></span>` : ''; };
+  meta();
+  const putChart = (v, what) => { if (ta.value.trim() && ta.value.trim() !== v.trim() && !confirm(`Ya hay letra en el editor. ¿La cambio por ${what}?`)) return false; ta.value = v; refresh(); if (h.pv.hidden && matchMedia('(min-width:760px)').matches) $('#sPrevT', w).click(); return true; };
+
+  // 1) buscar la canción → datos + letra
+  $('#sFind', w).onclick = () => openSongSearch(($('#sT', w).value + ' ' + $('#sA', w).value).trim(), async r => {
+    $('#sT', w).value = r.title; if (!$('#sA', w).value.trim() || confirm(`¿Pongo «${r.artist}» como artista?`)) $('#sA', w).value = r.artist;
+    s.meta = Object.assign({}, s.meta, { title: r.title, artist: r.artist, album: r.album, year: r.year, dur: r.dur, cover: r.cover, src: r.src, url: r.url, mbid: r.mbid || '', isrc: r.isrc || '' });
+    const dup = ST.songs.find(x => x.id !== s.id && normT(x.title) === normT(r.title));
+    if (dup) toast(`Ojo: ya hay una «${dup.title}» en la biblioteca${dup.artist ? ' (' + dup.artist + ')' : ''}.`, 5000);
+    meta(); msg('Buscando la letra…');
+    const L = await findLyrics(r.title, r.artist, r.dur);
+    if (L && (L.plain || L.synced)) {
+      s.meta.lyrics = L.synced ? 'synced' : 'plain'; s.meta.synced = L.synced || null;
+      const plain = L.plain || L.synced.map(x => x.text).join('\n').replace(/\n{2,}/g, '\n\n');
+      if (putChart(lyricsToChart(plain), 'la letra encontrada')) msg(L.synced ? 'Letra lista. Ahora toca «Sacar acordes del audio» con el MP3 de esta misma versión y los acordes caen solos sobre la letra.' : 'Letra lista y separada en estrofas. Revisa los nombres de las secciones y añade los acordes (o sácalos del audio).');
+    } else { s.meta.lyrics = 'none'; msg('La letra no está en la base abierta. Pégala, impórtala o busca el cifrado en internet.'); }
+    meta();
+  });
+  $('#sT', w).addEventListener('keydown', e => { if (e.key === 'Enter' && !s.id) { e.preventDefault(); $('#sFind', w).click(); } });
+
+  // 2) sacar acordes del audio
+  $('#sAud', w).onclick = () => $('#sAudF', w).click();
+  $('#sAudF', w).onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    const b = $('#sAud', w); b.disabled = true;
+    try {
+      const an = await analyzeAudio(f, (p, m) => msg(`${m} ${Math.round(p * 100)}%`));
+      s.analysis = an; const sel = $('#sK', w);
+      const k = keyOpt(sel, an.key); if (k && (!sel.value || (sel.value !== k && confirm(`El audio suena en ${k} y la canción dice ${sel.value}. ¿Cambio el tono a ${k}?`)))) { sel.value = k; h.kc(); }
+      if (an.bpm && !$('#sB', w).value) { $('#sB', w).value = an.bpm; h.tg(); }
+      const key = sel.value || k;
+      // si no hay letra con tiempos, se intenta una vez más con la duración exacta del audio
+      if (!(s.meta && s.meta.synced) && $('#sT', w).value.trim()) { msg('Buscando la letra con tiempos…'); const L = await findLyrics($('#sT', w).value.trim(), $('#sA', w).value.trim(), an.dur); if (L && L.synced) { s.meta = Object.assign({}, s.meta, { lyrics: 'synced', synced: L.synced }); meta(); } }
+      const doubt = an.segs.filter(x => x.conf < 0.45).length, pc = Math.round(an.conf * 100);
+      const synced = s.meta && s.meta.synced, durOk = !s.meta || !s.meta.dur || Math.abs(s.meta.dur - an.dur) < 6;
+      if (synced && durOk) { if (putChart(alignChart(synced, an, key), 'la letra con los acordes del audio')) msg(`Listo: tono ${key || an.key}, ${an.bpm || '?'} BPM, acordes sobre la letra (seguridad ${pc}%${doubt ? `, ${doubt} cambios dudosos` : ''}). Revisa con la vista previa y corrige lo que haga falta.`); }
+      else { const pr = progressionChart(an, key); ta.value = (ta.value.trim() ? pr + '\n\n' + ta.value.trim() : pr); refresh();
+        msg(`Tono ${key || an.key}, ${an.bpm || '?'} BPM (seguridad ${pc}%). ${synced && !durOk ? 'El audio no dura lo mismo que la versión buscada, así que puse' : 'Puse'} la progresión arriba: copia cada acorde a su sílaba tocando los botones.`); }
+    } catch (err) { msg(err.message || String(err)); toast(err.message || 'No pude analizar el audio', 5000); }
+    b.disabled = false;
+  };
+
+  // 3) importar archivo (ChordPro, TXT, LRC)
+  $('#sImp', w).onclick = () => $('#sImpF', w).click();
+  $('#sImpF', w).onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    const r = importSongFile(f.name, await f.text());
+    if (r.title && !$('#sT', w).value.trim()) $('#sT', w).value = r.title; if (r.artist && !$('#sA', w).value.trim()) $('#sA', w).value = r.artist;
+    const sel = $('#sK', w), k = keyOpt(sel, r.key); if (k && !sel.value) { sel.value = k; h.kc(); } if (r.bpm && !$('#sB', w).value) { $('#sB', w).value = r.bpm; h.tg(); }
+    if (r.chart && putChart(r.chart, 'lo del archivo')) msg(`Importado desde ${r.from}. Revisa con la vista previa.`); };
+
+  // 4) buscar un cifrado en internet: se abre en otra pestaña y lo pegas
+  $('#sGo', w).onclick = () => { const t = $('#sT', w).value.trim(); if (!t) { $('#sT', w).focus(); return toast('Escribe primero el nombre de la canción.'); }
+    window.open(searchChordsUrl(t, $('#sA', w).value.trim()), '_blank', 'noopener'); msg('Cuando encuentres el cifrado, cópialo completo y toca «Pegar cifrado».'); };
+}
+function openExport(s) {
+  if (!s) return;
+  modal(`${ph('Exportar · ' + esc(s.title))}<p class="hint" style="margin-top:0">Sale en el tono que tienes puesto${ST.sheet && ST.sheet.semi ? ' (transpuesto)' : ''}.</p>
+    <div class="list"><button class="row click" data-x="pdf"><span class="tx"><b>PDF / imprimir</b><small>Para imprimir o guardar como PDF</small></span></button>
+    <button class="row click" data-x="txt"><span class="tx"><b>Texto (acordes arriba)</b><small>Para WhatsApp o cualquier editor</small></span></button>
+    <button class="row click" data-x="cho"><span class="tx"><b>ChordPro (.cho)</b><small>Lo abren OnSong, SongbookPro, Planning Center y otras apps</small></span></button></div>`, (w, close) => {
+    $$('[data-x]', w).forEach(b => b.onclick = () => { close(); exportSong(s, b.dataset.x); });
+  });
+}
+
 /* ================= RF App: la app ================= */
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -1279,7 +1665,7 @@ const I = {
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   pin: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
   yt: '<rect x="2.5" y="5" width="19" height="14" rx="4"/><path d="m10 9 5 3-5 3z" fill="currentColor"/>', sp: '<circle cx="12" cy="12" r="9.5"/><path d="M7 9.5c3.6-1 7.3-.7 10.3.9M7.6 12.6c3-.8 6-.5 8.6.8M8.3 15.5c2.4-.6 4.7-.4 6.8.6"/>',
-  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', up: '<path d="m6 15 6-6 6 6"/>', down: '<path d="m6 9 6 6 6-6"/>', back: '<path d="M15 5 8 12l7 7"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', audio: '<path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10M21 12h0"/>', dl: '<path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/>', up: '<path d="m6 15 6-6 6 6"/>', down: '<path d="m6 9 6 6 6-6"/>', back: '<path d="M15 5 8 12l7 7"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>', gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   mix: '<path d="M5 3v18M12 3v18M19 3v18"/><rect x="3" y="13" width="4" height="4" rx="1" fill="currentColor"/><rect x="10" y="6" width="4" height="4" rx="1" fill="currentColor"/><rect x="17" y="10" width="4" height="4" rx="1" fill="currentColor"/>',
   wifi: '<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.6 16a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19.3" r="1.1" fill="currentColor" stroke="none"/>',
@@ -1588,10 +1974,10 @@ function viewSong(id) {
   return `<div class="wrap"><div class="sheet-top"><button class="ib" data-back="${ST.tab}" aria-label="Volver">${ic('back')}</button><div class="tx"><div class="eyebrow">${esc(s.artist || '')}</div><h1>${esc(s.title)}</h1>
       <div class="facts"><div class="fact"><small>Tono</small><b>${esc(key || '—')}</b></div><div class="fact"><small>Tempo</small><b>${s.bpm ? s.bpm + ' <span style="font-size:13px;color:var(--muted)">BPM</span>' : '—'}</b></div><div class="fact"><small>Compás</small><b>${s.meter || 4}/4</b></div>${used.length ? `<div class="fact"><small>Se canta</small><b style="font-family:var(--ui);font-size:14px;padding-top:5px">${used.map(u => cap(dShort.format(pD(u.date)))).join(', ')}</b></div>` : ''}</div></div>
       <div class="links">${s.youtube ? `<a class="lk yt big" target="_blank" rel="noopener" href="${esc(s.youtube)}">${ic('yt')}Escuchar en YouTube</a>` : ''}${s.spotify ? `<a class="lk sp big" target="_blank" rel="noopener" href="${esc(s.spotify)}">${ic('sp')}Escuchar en Spotify</a>` : ''}${!s.youtube && !s.spotify ? '<span class="pill warn">Falta el enlace de la versión original</span>' : ''}<button class="btn small" data-editsong="${s.id}">${ic('edit')}Editar</button></div></div>
-    <div class="tools"><div class="seg"><button class="${mode === 'lyrics' ? 'on' : ''}" data-mode="lyrics">Letra</button><button class="${mode === 'chords' ? 'on' : ''}" data-mode="chords"${hasC ? '' : ' disabled title="Esta canción todavía no tiene acordes"'}>Cifrado</button><button class="${mode === 'nash' ? 'on' : ''}" data-mode="nash"${hasC ? '' : ' disabled'}>Números</button></div>
+    <div class="tools"><div class="seg"><button class="${mode === 'lyrics' ? 'on' : ''}" data-mode="lyrics">Letra</button><button class="${mode === 'chords' ? 'on' : ''}" data-mode="chords"${hasC ? '' : ' disabled title="Esta canción todavía no tiene acordes"'}>Cifrado</button><button class="${mode === 'nash' ? 'on' : ''}" data-mode="nash"${hasC ? '' : ' disabled'}>Números</button><button class="${mode === 'latin' ? 'on' : ''}" data-mode="latin"${hasC ? '' : ' disabled'} title="Acordes en Do, Re, Mi">Do Re Mi</button></div>
       ${mode !== 'lyrics' && hasC ? `<div class="tr" aria-label="Transponer"><button data-semi="-1" aria-label="Bajar medio tono">−</button><span>${esc(key || '—')}</span><button data-semi="1" aria-label="Subir medio tono">+</button></div>${sh.semi ? `<button class="btn small ghost" data-semi="0">Tono original</button>` : ''}` : ''}
-      <button class="btn small ghost" data-big>${sh.big ? 'A−' : 'A+'}</button></div>
-    <article class="chart${mode === 'lyrics' ? ' lyr' : ''}${sh.big ? ' big' : ''}">${renderChart(s.chart, { key: baseKey, semi: sh.semi, nash: mode === 'nash' })}</article>
+      <button class="btn small ghost" data-big>${sh.big ? 'A−' : 'A+'}</button><button class="btn small ghost" data-export="${s.id}">${ic("dl")}Exportar</button></div>
+    <article class="chart${mode === 'lyrics' ? ' lyr' : ''}${sh.big ? ' big' : ''}">${renderChart(s.chart, { key: baseKey, semi: sh.semi, nash: mode === 'nash', latin: mode === 'latin' })}</article>
     ${!hasC ? `<p class="hint">${s.chart ? 'Tiene letra pero no acordes.' : 'Todavía no tiene letra ni acordes.'} Toca «Editar» y pega el cifrado: sirve el de cualquier página (acordes arriba de la letra) o el formato [G]palabra.</p>` : ''}</div>`;
 }
 
@@ -1861,7 +2247,7 @@ function chooseSongs(sid) {
 }
 function editSong(id, after) {
   const s = id ? Object.assign({}, song(id)) : { title: '', artist: '', key: '', bpm: '', youtube: '', spotify: '', chart: '' };
-  modal(`${ph(id ? 'Editar canción' : 'Canción nueva')}<div class="sedit"><div class="sedit-f"><div class="fgrid"><div class="field"><label for="sT">Nombre</label><input class="in" id="sT" value="${esc(s.title)}" required></div><div class="field"><label for="sA">Artista o versión</label><input class="in" id="sA" value="${esc(s.artist || '')}"></div></div>
+  modal(`${ph(id ? 'Editar canción' : 'Canción nueva')}<div class="sedit"><div class="sedit-f"><button type="button" class="sfind" id="sFind">${ic('search')}<span><b>${id ? 'Buscar la canción otra vez' : 'Buscar la canción'}</b><small>Escribe el nombre, escoge la versión y se traen los datos y la letra</small></span></button><div class="smeta" id="sMeta"></div><div class="fgrid"><div class="field"><label for="sT">Nombre</label><input class="in" id="sT" value="${esc(s.title)}" required></div><div class="field"><label for="sA">Artista o versión</label><input class="in" id="sA" value="${esc(s.artist || '')}"></div></div>
     <div class="fgrid"><div class="field"><label for="sK">Tono</label><select class="in" id="sK"><option value="">—</option>${['C', 'C#', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B', 'Cm', 'C#m', 'Dm', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'Bbm', 'Bm'].map(k => `<option${k === s.key ? ' selected' : ''}>${k}</option>`).join('')}</select></div><div class="field"><label for="sB">Tempo (BPM)</label><input class="in" id="sB" type="number" inputmode="numeric" value="${esc(s.bpm || '')}"></div></div>
     <div class="field lnk"><label for="sY">Versión original en YouTube</label><input class="in" id="sY" value="${esc(s.youtube || '')}" placeholder="https://youtube.com/…"></div>
     <div class="field lnk"><label for="sS">Versión original en Spotify</label><input class="in" id="sS" value="${esc(s.spotify || '')}" placeholder="https://open.spotify.com/track/…"></div>
@@ -1873,7 +2259,7 @@ function editSong(id, after) {
           <div class="etr"><span class="etl">Acorde</span><div class="cbar" id="sCk" aria-label="Acordes del tono"></div></div>
         </div>
         <div class="ebody"><textarea class="in chartin" id="sC" spellcheck="false" placeholder="Toca una sección para empezar y escribe la letra. Para un acorde, pon el cursor justo antes de la sílaba y toca el acorde.&#10;&#10;[Verso 1]&#10;[G]Cuando sale el [D]sol…">${esc(s.chart || '')}</textarea><div class="cprev" id="sPrev" hidden></div></div>
-        <div class="efoot"><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado de una página</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
+        <div class="efoot"><button type="button" class="btn small primary" id="sAud">${ic('audio')}Sacar acordes del audio</button><input type="file" id="sAudF" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado</button><button type="button" class="btn small ghost" id="sImp">Importar archivo</button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,text/plain" hidden><button type="button" class="btn small ghost" id="sGo">Buscar cifrado en internet</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
       </div></div></div>
     <div class="links">${id && isDir() ? `<button class="btn ghost danger" data-del>${ic('trash')}Eliminar</button>` : ''}<span style="flex:1"></span><button class="btn primary" id="sSave">Guardar</button></div>`, (w, close) => {
     const ta = $('#sC', w);
@@ -1920,10 +2306,11 @@ function editSong(id, after) {
         ta.value = $('#pzRep', w2).checked ? v : (ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n\n' : '') + v; close2(); ta.dispatchEvent(new Event('input'));
         $('#sCh', w).textContent = 'Listo. Revisa con la vista previa que cada acorde haya quedado sobre la sílaba correcta.'; if (pv.hidden) $('#sPrevT', w).click(); };
     });
+    studioBind(s, w, ta, { kc, prev, pv, tg });
     $('#sSave', w).onclick = async () => {
       const t = $('#sT', w).value.trim(); if (!t) { $('#sT', w).focus(); toast('Ponle nombre a la canción.'); return; }
       let ch = ta.value; if (looksChordsOver(ch)) ch = fromChordsOver(ch);
-      Object.assign(s, { title: t, artist: $('#sA', w).value.trim(), key: $('#sK', w).value, bpm: +$('#sB', w).value || null, youtube: $('#sY', w).value.trim(), spotify: $('#sS', w).value.trim(), chart: ch, tags });
+      Object.assign(s, { title: t, artist: $('#sA', w).value.trim(), key: $('#sK', w).value, bpm: +$('#sB', w).value || null, youtube: $('#sY', w).value.trim(), spotify: $('#sS', w).value.trim(), chart: ch, tags, meta: s.meta || null, analysis: s.analysis || null });
       if (!s.youtube && !s.spotify) toast('Recuerda agregar el enlace de la versión original para que el equipo la pueda sacar.', 4000); else if (!id) toast('Canción agregada. Queda pendiente cargar su playback en RF Playback.', 4000);
       const saved = await DB.saveSong(s); close(); await reload(); after && after(saved || s);
     };
@@ -1999,6 +2386,7 @@ function bind(m) {
   on('[data-viewphoto]', e => viewPhoto(e.dataset.viewphoto));
   $$('[data-photo]', m).forEach(inp => inp.onchange = async () => { const f = inp.files && inp.files[0]; if (!f) return; try { const photo = await photoData(f); const who = Object.assign({}, mem(inp.dataset.photo)); who.photo = photo; await DB.saveMember(who); toast('Foto actualizada.'); await reload(); } catch (x) { toast(x.message, 4000); } });
   on('[data-nophoto]', async e => { const who = Object.assign({}, mem(e.dataset.nophoto), { photo: '' }); await DB.saveMember(who); await reload(); });
+  on('[data-export]', e => openExport(song(e.dataset.export)));
   on('[data-mode]', e => { ST.sheet.mode = e.dataset.mode; render(); });
   on('[data-semi]', e => { const d = +e.dataset.semi; ST.sheet.semi = d === 0 ? 0 : ((ST.sheet.semi + d + 18) % 12) - 6; render(); });
   on('[data-big]', () => { ST.sheet.big = !ST.sheet.big; render(); });
