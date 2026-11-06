@@ -612,6 +612,22 @@ html,body{overflow-x:clip;max-width:100%}
   .mhead.hide{transform:translateY(calc(-100% + env(safe-area-inset-top,0px)));opacity:0;pointer-events:none}
 }
 
+/* campanita */
+.bell{position:relative}
+.bell .bdg{position:absolute;top:-3px;right:-3px;min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:#FF3B30;color:#fff;font-size:10.5px;font-weight:700;display:grid;place-items:center;line-height:1;box-shadow:0 0 0 2px var(--ink)}
+.rail .brand .bell{width:34px;height:34px}
+.ntl{display:flex;flex-direction:column;gap:6px}
+.nt{display:flex;gap:12px;align-items:flex-start;padding:12px;border-radius:16px;background:var(--card);cursor:default}
+.nt[data-ntsvc]{cursor:pointer}
+.nt.new{background:color-mix(in srgb,var(--gold) 12%,var(--card));box-shadow:inset 3px 0 0 var(--gold)}
+.nt .nic{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--card2);color:var(--gold)}
+.nt .nic svg{width:17px;height:17px}
+.nt .nic.k-aviso{color:#7AA7FF}.nt .nic.k-respuesta{color:#4FC7A3}
+.nt .tx{flex:1;min-width:0}.nt .tx b{display:block;font-size:14.5px;line-height:1.3}
+.nt .tx p{margin:3px 0 0;color:var(--muted);font-size:13.5px;line-height:1.4;white-space:pre-line}
+.nt .tx small{display:block;margin-top:4px;color:var(--dim);font-size:12px}
+.nt .ib.sm{width:28px;height:28px;flex:none}.nt .ib.sm svg{width:14px;height:14px}
+
 </style>
 <div id="root"></div>
 <script>
@@ -801,6 +817,19 @@ const DemoDB = (() => {
     async saveService(sv) { const cur = st.services.find(x => x.id === sv.id); if (cur) Object.assign(cur, sv); else { sv.id = sv.id || uid(); sv.team = sv.team || []; sv.songs = sv.songs || []; st.services.push(sv); } save(); return sv; },
     async deleteService(id) { st.services = st.services.filter(s => s.id !== id); save(); },
     async saveProgram(id, program) { const s = st.services.find(x => x.id === id); if (s) s.program = program; save(); },
+    // notificaciones de ejemplo (la campanita)
+    async notices() {
+      if (!st.notices) { const s1 = st.services.find(x => x.date >= isoD(new Date())) || st.services[0]; const t = Date.now();
+        st.notices = [
+          { id: uid(), created_at: new Date(t - 36e5 * 3).toISOString(), kind: 'aviso', title: 'Ensayo general el sábado', body: 'Llegamos 30 minutos antes para probar in-ears.', by_member: 'm0' },
+          { id: uid(), created_at: new Date(t - 36e5 * 26).toISOString(), kind: 'repertorio', title: 'Canciones para ' + (s1.name || 'el servicio'), body: 'Ya están las canciones para estudiar.', service_id: s1.id },
+          { id: uid(), created_at: new Date(t - 36e5 * 50).toISOString(), kind: 'asignacion', title: 'Te asignaron en ' + (s1.name || 'el servicio'), body: 'Confirma si puedes.', service_id: s1.id, to_member: st.me },
+        ]; }
+      const me = this.me(); return clone(st.notices.filter(n => me.is_director || (!n.for_directors && (!n.to_member || n.to_member === me.id)))).sort((a, b) => b.created_at.localeCompare(a.created_at));
+    },
+    async sendNotice(n) { (st.notices = st.notices || []).push(Object.assign({ id: uid(), created_at: new Date().toISOString(), kind: 'aviso', by_member: st.me }, n)); save(); },
+    async deleteNotice(id) { st.notices = (st.notices || []).filter(n => n.id !== id); save(); },
+    async markSeen() { const m = st.members.find(x => x.id === st.me); if (m) m.notif_seen = new Date().toISOString(); save(); },
     async assign(a) { const s = st.services.find(x => x.id === a.service_id); const row = { id: uid(), member_id: a.member_id, role: a.role, status: 'pending', chooses: !!a.chooses }; s.team.push(row); save(); return row; },
     async updateAssign(id, patch) { st.services.forEach(s => s.team.forEach(t => { if (t.id === id) Object.assign(t, patch); })); save(); },
     async unassign(id) { st.services.forEach(s => { s.team = s.team.filter(t => t.id !== id); }); save(); },
@@ -844,6 +873,10 @@ const SupaDB = (cfg) => {
     async saveService(sv) { const row = { date: sv.date, time: sv.time || '', name: sv.name || 'Servicio', notes: sv.notes || '', rehearsal_at: sv.rehearsal_at || null, rehearsal_place: sv.rehearsal_place || '', rehearsal_notes: sv.rehearsal_notes || '', choose_by: sv.choose_by || null }; if (sv.id) { await q(sb.from('services').update(row).eq('id', sv.id)); return sv; } return q(sb.from('services').insert(row).select('*').single()); },
     async deleteService(id) { await q(sb.from('services').delete().eq('id', id)); },
     async saveProgram(id, program) { await q(sb.from('services').update({ program }).eq('id', id)); },
+    async notices() { return q(sb.from('notices').select('*').order('created_at', { ascending: false }).limit(60)); },
+    async sendNotice(n) { await q(sb.from('notices').insert({ kind: 'aviso', title: n.title, body: n.body || '', to_member: n.to_member || null, by_member: meRow && meRow.id })); },
+    async deleteNotice(id) { await q(sb.from('notices').delete().eq('id', id)); },
+    async markSeen() { if (!meRow) return; const t = new Date().toISOString(); await q(sb.from('members').update({ notif_seen: t }).eq('id', meRow.id)); meRow.notif_seen = t; },
     async assign(a) { return q(sb.from('assignments').insert({ service_id: a.service_id, member_id: a.member_id, role: a.role, chooses: !!a.chooses }).select('*').single()); },
     async updateAssign(id, patch) { await q(sb.from('assignments').update(patch).eq('id', id)); },
     async unassign(id) { await q(sb.from('assignments').delete().eq('id', id)); },
@@ -1192,7 +1225,7 @@ const initials = n => String(n || '?').replace(/\(.*?\)/g, '').trim().split(/\s+
 const gcal = (title, start, mins, place, details) => { const f = d => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); const e = new Date(start.getTime() + mins * 6e4); return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${f(start)}/${f(e)}&location=${encodeURIComponent(place || '')}&details=${encodeURIComponent(details || '')}`; };
 
 let DB = DemoDB;
-const ST = { tab: 'home', view: null, members: [], songs: [], services: [], songFilter: '', songSeg: 'all', sheet: { semi: 0, mode: null, big: false }, live: null };
+const ST = { tab: 'home', view: null, members: [], songs: [], services: [], notices: [], songFilter: '', songSeg: 'all', sheet: { semi: 0, mode: null, big: false }, live: null };
 let toastT;
 function toast(msg, ms = 2600) { let t = $('#toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); document.body.append(t); } t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms); }
 const me = () => DB.me() || {};
@@ -1204,7 +1237,48 @@ const past = () => ST.services.filter(s => pD(s.date) < new Date(new Date().toDa
 const myAssign = s => s.team.filter(t => t.member_id === me().id);
 const canChoose = s => isDir() || myAssign(s).some(t => t.chooses);
 const lastUsed = sid => { const p = past().find(s => s.songs.some(x => x.song_id === sid)); return p ? pD(p.date) : null; };
-async function reload() { [ST.members, ST.songs, ST.services] = await Promise.all([DB.members(), DB.songs(), DB.services()]); render(); }
+async function reload() {
+  const prev = new Set(ST.notices.map(n => n.id)), first = !ST._nLoaded;
+  [ST.members, ST.songs, ST.services, ST.notices] = await Promise.all([DB.members(), DB.songs(), DB.services(), DB.notices ? DB.notices().catch(() => []) : []]);
+  ST._nLoaded = true; render();
+  // llegó algo nuevo mientras la app está abierta: se avisa abajo
+  if (!first) { const nw = ST.notices.filter(n => !prev.has(n.id) && n.by_member !== me().id); if (nw.length) toast(nw.length === 1 ? '🔔 ' + nw[0].title : `🔔 ${nw.length} notificaciones nuevas`, 4500); }
+}
+/* ---------- la campanita ---------- */
+const N_IC = { aviso: 'mega', asignacion: 'cal', repertorio: 'music', programa: 'note', respuesta: 'team' };
+function notifSeen() { const m = ST.members.find(x => x.id === me().id) || me(); return m.notif_seen || ''; }
+const unread = () => { const seen = notifSeen(), id = me().id; return ST.notices.filter(n => n.created_at > seen && n.by_member !== id); };
+function bellBtn() { const n = unread().length; return `<button class="ib bell" data-bell aria-label="Notificaciones${n ? ': ' + n + ' sin leer' : ''}" title="Notificaciones">${ic('bell')}${n ? `<span class="bdg">${n > 9 ? '9+' : n}</span>` : ''}</button>`; }
+function relT(ts) {
+  const d = (Date.now() - new Date(ts)) / 6e4; if (d < 1) return 'ahora'; if (d < 60) return `hace ${Math.round(d)} min`; if (d < 60 * 24) return `hace ${Math.round(d / 60)} h`;
+  if (d < 60 * 48) return 'ayer'; return new Date(ts).toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+function openNotices() {
+  const seen = notifSeen(), dir = !!me().is_director, by = id => (ST.members.find(m => m.id === id) || {}).name || '';
+  const row = n => `<div class="nt${n.created_at > seen && n.by_member !== me().id ? ' new' : ''}" data-nt="${n.id}"${n.service_id ? ` data-ntsvc="${n.service_id}"` : ''}>
+      <span class="nic k-${esc(n.kind)}">${ic(N_IC[n.kind] || 'bell')}</span>
+      <div class="tx"><b>${esc(n.title)}</b>${n.body ? `<p>${esc(n.body)}</p>` : ''}<small>${relT(n.created_at)}${n.kind === 'aviso' && by(n.by_member) ? ' · ' + esc(by(n.by_member)) : ''}${n.to_member && dir && n.to_member !== me().id ? ' · solo para ' + esc(by(n.to_member)) : ''}${n.for_directors ? ' · solo directores' : ''}</small></div>
+      ${dir ? `<button class="ib sm" data-ntdel="${n.id}" aria-label="Borrar">${ic('x')}</button>` : ''}</div>`;
+  modal(`${ph('Notificaciones')}
+    ${dir ? `<div class="links" style="margin:-4px 0 12px"><button class="btn primary" data-ntnew>${ic('mega')}Enviar aviso al equipo</button></div>` : ''}
+    <div class="ntl">${ST.notices.length ? ST.notices.map(row).join('') : `<div class="empty">${ic('bell')}<p>No tienes notificaciones todavía. Aquí te llegan tus asignaciones, las canciones para estudiar, el programa y los avisos del director.</p></div>`}</div>`, (w, close) => {
+    $$('[data-ntsvc]', w).forEach(e => e.onclick = ev => { if (ev.target.closest('[data-ntdel]')) return; close(); setTimeout(() => { ST.tab = 'services'; ST.view = { type: 'service', id: e.dataset.ntsvc }; render(); window.scrollTo(0, 0); }, 60); });
+    $$('[data-ntdel]', w).forEach(b => b.onclick = async ev => { ev.stopPropagation(); await DB.deleteNotice(b.dataset.ntdel); b.closest('.nt').remove(); ST.notices = ST.notices.filter(n => n.id !== b.dataset.ntdel); });
+    const nn = $('[data-ntnew]', w); if (nn) nn.onclick = () => { close(); setTimeout(composeNotice, 60); };
+  });
+  // al abrirla, todo queda leído
+  if (unread().length) DB.markSeen().then(() => { const t = new Date().toISOString(), m = ST.members.find(x => x.id === me().id); if (m) m.notif_seen = t; if (me()) me().notif_seen = t; $$('.bell .bdg').forEach(b => b.remove()); }).catch(() => {});
+}
+function composeNotice() {
+  modal(`${ph('Aviso al equipo')}
+    <div class="field"><label for="ntT">Título</label><input class="in" id="ntT" maxlength="80" placeholder="Ej.: Ensayo general el sábado a las 4"></div>
+    <div class="field"><label for="ntB">Mensaje</label><textarea class="in" id="ntB" rows="4" maxlength="600" placeholder="Lo que necesitan saber"></textarea></div>
+    <div class="field"><label for="ntTo">Para</label><select class="in" id="ntTo"><option value="">Todo el equipo</option>${ST.members.filter(m => m.id !== me().id).map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select></div>
+    <div class="links"><span style="flex:1"></span><button class="btn primary" id="ntGo">${ic('mega')}Enviar</button></div>`, (w, close) => {
+    $('#ntGo', w).onclick = async () => { const t = $('#ntT', w).value.trim(); if (!t) { $('#ntT', w).focus(); return toast('Ponle un título al aviso.'); }
+      $('#ntGo', w).disabled = true; try { await DB.sendNotice({ title: t, body: $('#ntB', w).value.trim(), to_member: $('#ntTo', w).value || null }); close(); toast('Aviso enviado.'); await reload(); } catch (e) { $('#ntGo', w).disabled = false; toast(e.message, 5000); } };
+  });
+}
 
 /* ---------- navegación ---------- */
 const TABS = [['home', 'Inicio', 'home'], ['services', 'Agenda', 'cal'], ['songs', 'Canciones', 'music'], ['team', 'Equipo', 'team'], ['stage', 'Escenario', 'live']];
@@ -1214,13 +1288,13 @@ const tabGo = k => k === 'stage' ? (ST.stage || 'live') : k;
 function go(tab, view) { if (tab === 'live' || tab === 'mix') ST.stage = tab; ST.tab = tab; ST.view = view || null; if (tab !== 'live') stopLive(); if (tab !== 'mix') mixStop(); else setTimeout(mixStart, 0); try { history.replaceState(null, '', '#' + tab); } catch (e) {} render(); window.scrollTo(0, 0); }
 function shell() {
   const pend = upcoming().some(s => myAssign(s).some(t => t.status === 'pending'));
-  return `<div class="app"><nav class="rail" aria-label="Secciones"><div class="brand">${logo()}<div><b>RF App</b><small>Rompiendo Fortalezas</small></div><span style="flex:1"></span>${themeBtn()}</div>
+  return `<div class="app"><nav class="rail" aria-label="Secciones"><div class="brand">${logo()}<div><b>RF App</b><small>Rompiendo Fortalezas</small></div><span style="flex:1"></span>${bellBtn()}${themeBtn()}</div>
     ${TABS.map(([k, l, i]) => `<button class="navb${tabOn(k) ? ' on' : ''}" data-tab="${tabGo(k)}">${ic(i)}${l}${k === 'home' && pend ? '<span class="pill warn">1</span>' : ''}</button>`).join('')}
     <span class="sp"></span><button class="navb${ST.tab === 'me' ? ' on' : ''}" data-tab="me">${avt(me(), 'sm')}Mi perfil</button></nav>
     <main class="main" id="main"></main>
     <nav class="tabbar" aria-label="Secciones">${TABS.map(([k, l, i]) => `<button class="${tabOn(k) ? 'on' : ''}" data-tab="${tabGo(k)}" aria-label="${l}">${ic(i)}<span>${l}</span>${k === 'home' && pend ? '<i class="dot"></i>' : ''}</button>`).join('')}</nav></div>`;
 }
-const mhead = () => `<header class="mhead">${logo()}<b>RF App</b><span class="sp"></span>${themeBtn()}<button class="mav${ST.tab === 'me' ? ' on' : ''}" data-tab="me" aria-label="Mi perfil">${avt(me(), 'sm')}</button></header>`;
+const mhead = () => `<header class="mhead">${logo()}<b>RF App</b><span class="sp"></span>${bellBtn()}${themeBtn()}<button class="mav${ST.tab === 'me' ? ' on' : ''}" data-tab="me" aria-label="Mi perfil">${avt(me(), 'sm')}</button></header>`;
 /* atrás del teléfono: abrir una canción, un servicio o un perfil deja un paso en el historial;
    el gesto de deslizar (iPhone) o el botón atrás (Android) lo cierra en vez de salirse de la app */
 const NAV = { open: false };
@@ -1248,6 +1322,7 @@ function render() {
   m.innerHTML = mhead() + html;
   $$('[data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
   $$('[data-themetg]').forEach(b => b.onclick = () => setTheme(effTheme() === 'dark' ? 'light' : 'dark'));
+  $$('[data-bell]').forEach(b => b.onclick = openNotices);
   bind(m); if (ST.tab === 'mix' && !ST.view) mixBind(); if (ST.tab === 'me') bindDrive();
 }
 const demoBar = () => DB.mode !== 'demo' ? '' : `<div class="demo">${ic('bell')}<span><b>Modo demostración.</b> Datos de ejemplo guardados solo en este navegador. Ver como:</span>
