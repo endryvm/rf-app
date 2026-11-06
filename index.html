@@ -590,6 +590,17 @@ body::after{content:"";position:fixed;inset:-10%;z-index:-1;pointer-events:none;
 .mxnet a{text-decoration:none}
 .mxip{width:150px;flex:0 0 auto;padding:8px 10px;font-variant-numeric:tabular-nums}
 
+/* teléfono: nada se sale por los lados */
+html,body{overflow-x:hidden;max-width:100%}
+.main,.wrap{min-width:0;max-width:100%}
+.top>*{min-width:0}
+.top .search{flex:1 1 100%}
+.top .seg{max-width:100%;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.top .seg::-webkit-scrollbar{display:none}
+.top .seg button{flex:none}
+.row,.row .tx{min-width:0}
+.row .tx b,.row .tx small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+
 </style>
 <div id="root"></div>
 <script>
@@ -880,7 +891,8 @@ const MixLive = sb => ({
 /* ---------- app nativa (Android / iPhone): el teléfono le habla DIRECTO a la X32 por su IP, como la app de Behringer ----------
    Sin internet y sin la computadora de Playback en el medio. Solo existe dentro de la app instalada (no en el navegador). */
 const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-const UDP = NATIVE && window.Capacitor.Plugins ? window.Capacitor.Plugins.RFUdp : null;
+// el conector se registra con capacitor.js (solo viene dentro de la app instalada)
+const UDP = !NATIVE ? null : window.capacitorExports && window.capacitorExports.registerPlugin ? window.capacitorExports.registerPlugin('RFUdp') : (window.Capacitor.Plugins || {}).RFUdp || null;
 const x32Ip = () => { try { return localStorage.getItem('rf-x32-ip') || ''; } catch (e) { return ''; } };
 const x32SetIp = v => { try { localStorage.setItem('rf-x32-ip', v); } catch (e) {} };
 const OSC = {
@@ -960,8 +972,15 @@ const MixDirect = {
     return new Promise(res => {
       let h = null, done = false; const end = ip => { if (done) return; done = true; if (h) h.remove(); res(ip); };
       UDP.addListener('msg', d => { try { const m = OSC.dec(OSC.unb64(d.data)); if (m.addr === '/xinfo' || m.addr === '/info') end(d.ip); } catch (e) {} }).then(x => { h = x; if (done) x.remove(); });
-      UDP.open().then(() => { const b = OSC.b64(OSC.enc('/xinfo')); [0, 400, 900].forEach(t => setTimeout(() => UDP.send({ ip: '255.255.255.255', port: 10023, data: b }).catch(() => {}), t)); }).catch(() => end(''));
-      setTimeout(() => end(''), 2500);
+      // 1) pregunta a todos (Android) · 2) por si el teléfono no deja (iPhone), le pregunta uno por uno a cada dirección de su red
+      UDP.open().then(async () => {
+        const b = OSC.b64(OSC.enc('/xinfo'));
+        [0, 400].forEach(t => setTimeout(() => UDP.send({ ip: '255.255.255.255', port: 10023, data: b }).catch(() => {}), t));
+        let me = ''; try { me = ((UDP.info ? await UDP.info() : null) || {}).ip || ''; } catch (e) {}
+        const m = /^(\d+\.\d+\.\d+)\.\d+$/.exec(me); if (!m) return;
+        for (let i = 1; i < 255 && !done; i++) { if (m[1] + '.' + i !== me) UDP.send({ ip: m[1] + '.' + i, port: 10023, data: b }).catch(() => {}); if (i % 32 === 0) await new Promise(r => setTimeout(r, 20)); }
+      }).catch(() => end(''));
+      setTimeout(() => end(''), 3500);
     });
   },
 };
@@ -1191,7 +1210,20 @@ function shell() {
     <nav class="tabbar" aria-label="Secciones">${TABS.map(([k, l, i]) => `<button class="${tabOn(k) ? 'on' : ''}" data-tab="${tabGo(k)}" aria-label="${l}">${ic(i)}<span>${l}</span>${k === 'home' && pend ? '<i class="dot"></i>' : ''}</button>`).join('')}</nav></div>`;
 }
 const mhead = () => `<header class="mhead">${logo()}<b>RF App</b><span class="sp"></span>${themeBtn()}<button class="mav${ST.tab === 'me' ? ' on' : ''}" data-tab="me" aria-label="Mi perfil">${avt(me(), 'sm')}</button></header>`;
+/* atrás del teléfono: abrir una canción, un servicio o un perfil deja un paso en el historial;
+   el gesto de deslizar (iPhone) o el botón atrás (Android) lo cierra en vez de salirse de la app */
+const NAV = { open: false };
+function navSync() {
+  if (ST.view && !NAV.open) { NAV.open = true; try { history.pushState({ rfv: 1 }, '', location.hash || '#' + ST.tab); } catch (e) {} }
+  else if (!ST.view && NAV.open) { NAV.open = false; if (history.state && history.state.rfv) { NAV.skip = true; history.back(); } }
+}
+window.addEventListener('popstate', () => {
+  if (NAV.skip) { NAV.skip = false; return; }
+  const mo = [...document.querySelectorAll('.modal')].pop(); if (mo && mo._close) { mo._close(true); return; }
+  if (ST.view) { NAV.open = false; ST.view = null; render(); window.scrollTo(0, 0); }
+});
 function render() {
+  navSync();
   document.getElementById('root').innerHTML = shell();
   const m = $('#main');
   const v = ST.view;
@@ -1599,7 +1631,9 @@ function editProgItem(list, i, done) {
 /* ---------- ventanas ---------- */
 function modal(html, onBind) {
   const w = document.createElement('div'); w.className = 'modal'; w.innerHTML = `<div class="panel" role="dialog" aria-modal="true">${html}</div>`; document.body.append(w);
-  const close = () => { w.remove(); document.removeEventListener('keydown', k); }; const k = e => { if (e.key === 'Escape') close(); };
+  try { history.pushState({ rfm: 1 }, '', location.hash || '#' + ST.tab); } catch (e) {}
+  const close = fromBack => { if (!w.isConnected) return; w.remove(); document.removeEventListener('keydown', k); if (fromBack !== true && history.state && history.state.rfm) { NAV.skip = true; history.back(); } }; const k = e => { if (e.key === 'Escape') close(); };
+  w._close = close;
   document.addEventListener('keydown', k); w.onclick = e => { if (e.target === w) close(); }; $$('[data-x]', w).forEach(b => b.onclick = close);
   onBind && onBind(w, close); const f = $('input,textarea,select', w); if (f && matchMedia('(min-width:720px)').matches) f.focus(); return close;
 }
