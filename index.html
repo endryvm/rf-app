@@ -1025,7 +1025,7 @@ const SupaDB = (cfg) => {
     },
     async sendCode(email) { await q(sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } })); },
     async signInPw(email, password) { const { error } = await sb.auth.signInWithPassword({ email, password }); if (error) throw new Error(/invalid/i.test(error.message) ? 'Correo o contraseña incorrectos. Si todavía no creaste tu contraseña, entra con código.' : error.message); },
-    async links(q) { try { const { data } = await sb.functions.invoke('asistente', { body: Object.assign({ task: 'links' }, q) }); return data || {}; } catch (e) { return {}; } },
+    async links(q) { try { const { data, error } = await sb.functions.invoke('asistente', { body: Object.assign({ task: 'links' }, q) }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} return { error: m }; } return data || {}; } catch (e) { return { error: e.message || String(e) }; } },
     async ia(body) { const { data, error } = await sb.functions.invoke('asistente', { body }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } if (data && data.error) throw new Error(data.error); return data.text; },
     async drive(action, extra) { const { data, error } = await sb.functions.invoke('drive', { body: Object.assign({ action }, extra || {}) }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } if (data && data.error) throw new Error(data.error); return data; },
     async setPassword(password) { await q(sb.auth.updateUser({ password })); },
@@ -1677,7 +1677,8 @@ function studioBind(s, w, ta, h) {
     // enlaces de YouTube y Spotify, en paralelo con la letra
     DB.links({ title: r.title, artist: r.artist, appleUrl: r.src === 'Apple Music' ? r.url : '' }).then(k => { let n = 0;
       if (k.youtube && !$('#sY', w).value.trim()) { $('#sY', w).value = k.youtube; n++; } if (k.spotify && !$('#sS', w).value.trim()) { $('#sS', w).value = k.spotify; n++; }
-      if (n) toast(`Puse ${n === 2 ? 'los enlaces de YouTube y Spotify' : k.youtube ? 'el enlace de YouTube' : 'el enlace de Spotify'}. Revisa que sea la versión correcta.`, 4000); });
+      if (n) toast(`Puse ${n === 2 ? 'los enlaces de YouTube y Spotify' : k.youtube ? 'el enlace de YouTube' : 'el enlace de Spotify'}. Revisa que sea la versión correcta.`, 4000);
+      else if (!$('#sY', w).value.trim() || !$('#sS', w).value.trim()) toast('No encontré los enlaces de YouTube/Spotify' + (k.why ? ' (' + k.why + ')' : k.error ? ' (' + k.error + ')' : '') + '.', 7000); });
     const L = await findLyrics(r.title, r.artist, r.dur);
     if (L && (L.plain || L.synced)) {
       s.meta.lyrics = L.synced ? 'synced' : 'plain'; s.meta.synced = L.synced || null;
