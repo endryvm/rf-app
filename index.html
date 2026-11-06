@@ -775,6 +775,17 @@ img,video,canvas,svg{max-width:100%}
 .aimic{flex:none;width:48px;height:48px}
 .aimic.on{background:#e5484d;color:#fff;animation:rfpulse 1.2s ease-in-out infinite}
 @keyframes rfpulse{50%{box-shadow:0 0 0 8px rgba(229,72,77,.18)}}
+.plv{margin-bottom:12px}
+.plv iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:14px;background:#000;display:block}
+.plv iframe.sp{aspect-ratio:auto;height:152px;background:none}
+.pll{max-height:40vh;overflow:auto}
+.pll .row.on{background:var(--card2,var(--card));outline:2px solid var(--gold)}
+.pll .num{width:22px;text-align:center;color:var(--muted);font-weight:600;flex:none}
+.pll .pill{flex:none}
+.pll .row{width:100%;display:flex;align-items:center;gap:12px;text-align:left;font:inherit;color:var(--fg);background:none;border:0;border-radius:12px;padding:10px 8px;cursor:pointer}
+.pll .row .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pll .row .tx small{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pll .row.on{outline:0;background:var(--card)}
 
 </style>
 <div id="root"></div>
@@ -967,6 +978,7 @@ const DemoDB = (() => {
     async saveMember(m) { if (!m.id) { m.id = uid(); m.color = m.color || COLORS[st.members.length % COLORS.length]; st.members.push(m); } else Object.assign(st.members.find(x => x.id === m.id) || {}, m); save(); return m; },
     async deleteMember(id) { st.members = st.members.filter(m => m.id !== id); st.services.forEach(s => { s.team = s.team.filter(t => t.member_id !== id); }); save(); },
     async songs() { return clone(st.songs); },
+    async links() { return {}; },
     async ia() { await new Promise(r => setTimeout(r, 600)); return 'En el modo de demostración el asistente no está conectado. En la app real responde Gemini con los datos de tus canciones y servicios.'; },
     async saveSong(s) { s.updated_at = new Date().toISOString(); if (!s.id || !st.songs.find(x => x.id === s.id)) { s.id = s.id || uid(); st.songs.push(s); } else Object.assign(st.songs.find(x => x.id === s.id), s); save(); return s; },
     async deleteSong(id) { st.songs = st.songs.filter(s => s.id !== id); st.services.forEach(s => { s.songs = s.songs.filter(x => x.song_id !== id); }); save(); },
@@ -1013,6 +1025,7 @@ const SupaDB = (cfg) => {
     },
     async sendCode(email) { await q(sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } })); },
     async signInPw(email, password) { const { error } = await sb.auth.signInWithPassword({ email, password }); if (error) throw new Error(/invalid/i.test(error.message) ? 'Correo o contraseña incorrectos. Si todavía no creaste tu contraseña, entra con código.' : error.message); },
+    async links(q) { try { const { data } = await sb.functions.invoke('asistente', { body: Object.assign({ task: 'links' }, q) }); return data || {}; } catch (e) { return {}; } },
     async ia(body) { const { data, error } = await sb.functions.invoke('asistente', { body }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } if (data && data.error) throw new Error(data.error); return data.text; },
     async drive(action, extra) { const { data, error } = await sb.functions.invoke('drive', { body: Object.assign({ action }, extra || {}) }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } if (data && data.error) throw new Error(data.error); return data; },
     async setPassword(password) { await q(sb.auth.updateUser({ password })); },
@@ -1660,7 +1673,11 @@ function studioBind(s, w, ta, h) {
     s.meta = Object.assign({}, s.meta, { title: r.title, artist: r.artist, album: r.album, year: r.year, dur: r.dur, cover: r.cover, src: r.src, url: r.url, mbid: r.mbid || '', isrc: r.isrc || '' });
     const dup = ST.songs.find(x => x.id !== s.id && normT(x.title) === normT(r.title));
     if (dup) toast(`Ojo: ya hay una «${dup.title}» en la biblioteca${dup.artist ? ' (' + dup.artist + ')' : ''}.`, 5000);
-    meta(); msg('Buscando la letra…');
+    meta(); msg('Buscando la letra y los enlaces…');
+    // enlaces de YouTube y Spotify, en paralelo con la letra
+    DB.links({ title: r.title, artist: r.artist, appleUrl: r.src === 'Apple Music' ? r.url : '' }).then(k => { let n = 0;
+      if (k.youtube && !$('#sY', w).value.trim()) { $('#sY', w).value = k.youtube; n++; } if (k.spotify && !$('#sS', w).value.trim()) { $('#sS', w).value = k.spotify; n++; }
+      if (n) toast(`Puse ${n === 2 ? 'los enlaces de YouTube y Spotify' : k.youtube ? 'el enlace de YouTube' : 'el enlace de Spotify'}. Revisa que sea la versión correcta.`, 4000); });
     const L = await findLyrics(r.title, r.artist, r.dur);
     if (L && (L.plain || L.synced)) {
       s.meta.lyrics = L.synced ? 'synced' : 'plain'; s.meta.synced = L.synced || null;
@@ -1787,6 +1804,32 @@ async function aiRun(actions) {
   }
   for (const [sid, l] of Object.entries(lists)) await DB.setServiceSongs(sid, l.map((x, i) => Object.assign(x, { position: i })));
   await reload();
+}
+
+/* ---------- escuchar el repertorio del servicio sin salir de la app ---------- */
+const ytId = u => (/(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/.exec(u || '') || [])[1] || '';
+const spId = u => (/track[\/:]([A-Za-z0-9]{22})/.exec(u || '') || [])[1] || '';
+function openPlaylist(sid) {
+  const sv = ST.services.find(x => x.id === sid); if (!sv) return;
+  const items = sv.songs.map(x => ({ x, s: song(x.song_id) })).filter(o => o.s); let cur = 0;
+  modal(`${ph('Escuchar · ' + esc(sv.name || 'Servicio'))}<div class="plv" id="plV"></div><div class="list pll" id="plL"></div><div class="links" id="plA"></div>`, w => {
+    const draw = () => {
+      const o = items[cur], y = o && ytId(o.s.youtube), sp = o && spId(o.s.spotify);
+      $('#plV', w).innerHTML = !o ? '<div class="empty">El servicio todavía no tiene canciones.</div>' : y ? `<iframe src="https://www.youtube-nocookie.com/embed/${y}?autoplay=1&playsinline=1&rel=0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="${esc(o.s.title)}"></iframe>` : sp ? `<iframe class="sp" src="https://open.spotify.com/embed/track/${sp}" allow="autoplay; encrypted-media" title="${esc(o.s.title)}"></iframe>` : `<div class="empty">«${esc(o.s.title)}» no tiene enlace todavía.</div>`;
+      $('#plL', w).innerHTML = items.map((o, i) => `<button type="button" class="row click${i === cur ? ' on' : ''}" data-pl="${i}"><span class="num">${i + 1}</span><span class="tx"><b>${esc(o.s.title)}</b><small>${esc(o.s.artist || '')}${o.x.key ? ' · tono ' + esc(o.x.key) : ''}</small></span>${ytId(o.s.youtube) ? `<span class="pill">YouTube</span>` : ''}${spId(o.s.spotify) ? `<span class="pill">Spotify</span>` : ''}</button>`).join('');
+      const ids = items.map(o => ytId(o.s.youtube)).filter(Boolean), missing = items.filter(o => !o.s.youtube || !o.s.spotify);
+      $('#plA', w).innerHTML = `${ids.length > 1 ? `<a class="btn small" target="_blank" rel="noopener" href="https://www.youtube.com/watch_videos?video_ids=${ids.join(',')}">${ic('yt')}Abrir todo como lista en YouTube</a>` : ''}${missing.length && isDir() ? `<button class="btn small ghost" id="plFill">Buscar los enlaces que faltan (${missing.length})</button>` : ''}`;
+      $$('[data-pl]', w).forEach(b => b.onclick = () => { cur = +b.dataset.pl; draw(); });
+      const f = $('#plFill', w); if (f) f.onclick = async () => { f.disabled = true; let n = 0;
+        for (const o of missing) { f.textContent = `Buscando ${++n} de ${missing.length}…`;
+          let apple = ''; try { const r = (await itunesSearch(o.s.title + ' ' + (o.s.artist || '')))[0]; apple = r ? r.url : ''; } catch (e) {}
+          const k = await DB.links({ title: o.s.title, artist: o.s.artist || '', appleUrl: apple }); const up = {};
+          if (k.youtube && !o.s.youtube) up.youtube = k.youtube; if (k.spotify && !o.s.spotify) up.spotify = k.spotify;
+          if (Object.keys(up).length) { Object.assign(o.s, up); try { await DB.saveSong(Object.assign({}, o.s)); } catch (e) {} } }
+        toast('Listo. Revisa que cada enlace sea la versión que tocan.', 4000); await reload(); draw(); };
+    };
+    draw();
+  });
 }
 
 /* ================= RF App: la app ================= */
@@ -2076,7 +2119,7 @@ function viewService(id) {
       <section class="card"><div class="sechead"><h3>Avisos</h3></div><p class="hint" style="margin:10px 0 0">${s.choose_by ? `Las canciones se eligen hasta el <b>${dLong.format(pD(s.choose_by))}</b>.` : 'Las canciones se eligen durante la semana.'} ${s.notes ? esc(s.notes) : ''}</p></section>
     </div>
     ${programSection(s)}
-    <div class="sechead"><h3>Repertorio</h3><span class="sp"></span>${canChoose(s) ? `<button class="btn small primary" data-choose="${s.id}">${ic('music')}${s.songs.length ? 'Editar repertorio' : 'Elegir canciones'}</button>` : ''}</div>
+    <div class="sechead"><h3>Repertorio</h3><span class="sp"></span>${s.songs.length ? `<button class="btn small" data-listen="${s.id}">${ic('yt')}Escuchar</button>` : ''}${canChoose(s) ? `<button class="btn small primary" data-choose="${s.id}">${ic('music')}${s.songs.length ? 'Editar repertorio' : 'Elegir canciones'}</button>` : ''}</div>
     <section class="card">${choosersProgress(s)}<div class="list setl">${s.songs.length ? s.songs.map((x, i) => rowSetSong(s, x, i, false)).join('') : '<div class="empty">Todavía no hay canciones. Los cantantes las eligen durante la semana.</div>'}</div>${teamStrip(s)}</section>
     <div class="sechead"><h3>Equipo y confirmaciones</h3><span class="sp"></span>${dir ? `<button class="btn small" data-addteam="${s.id}">${ic('plus')}Asignar</button>` : ''}</div>
     <div class="roles">${s.team.length ? ROLES.filter(r => byRole[r]).concat(Object.keys(byRole).filter(r => !ROLES.includes(r))).map(r => byRole[r].map(roleCard).join('')).join('') : '<div class="empty">Nadie asignado todavía.</div>'}</div>
@@ -2524,6 +2567,7 @@ function bind(m) {
   on('[data-viewphoto]', e => viewPhoto(e.dataset.viewphoto));
   $$('[data-photo]', m).forEach(inp => inp.onchange = async () => { const f = inp.files && inp.files[0]; if (!f) return; try { const photo = await photoData(f); const who = Object.assign({}, mem(inp.dataset.photo)); who.photo = photo; await DB.saveMember(who); toast('Foto actualizada.'); await reload(); } catch (x) { toast(x.message, 4000); } });
   on('[data-nophoto]', async e => { const who = Object.assign({}, mem(e.dataset.nophoto), { photo: '' }); await DB.saveMember(who); await reload(); });
+  on('[data-listen]', e => openPlaylist(e.dataset.listen));
   on('[data-export]', e => openExport(song(e.dataset.export)));
   on('[data-mode]', e => { ST.sheet.mode = e.dataset.mode; render(); });
   on('[data-semi]', e => { const d = +e.dataset.semi; ST.sheet.semi = d === 0 ? 0 : ((ST.sheet.semi + d + 18) % 12) - 6; render(); });
