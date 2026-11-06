@@ -591,7 +591,7 @@ body::after{content:"";position:fixed;inset:-10%;z-index:-1;pointer-events:none;
 .mxip{width:150px;flex:0 0 auto;padding:8px 10px;font-variant-numeric:tabular-nums}
 
 /* teléfono: nada se sale por los lados */
-html,body{overflow-x:hidden;max-width:100%}
+html,body{overflow-x:clip;max-width:100%}
 .main,.wrap{min-width:0;max-width:100%}
 .top>*{min-width:0}
 .top .search{flex:1 1 100%}
@@ -600,6 +600,17 @@ html,body{overflow-x:hidden;max-width:100%}
 .top .seg button{flex:none}
 .row,.row .tx{min-width:0}
 .row .tx b,.row .tx small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+
+/* encabezado del teléfono: más bajito, y se esconde al bajar (vuelve al subir) */
+@media (max-width:919px){
+  .main{padding-top:6px}
+  .mhead{margin:-6px -16px 8px;padding:calc(env(safe-area-inset-top,0px) + 2px) 16px 6px;transition:transform .25s ease,opacity .2s}
+  .mhead .logo{width:28px;height:28px;border-radius:8px}
+  .mhead>b{font-size:16px}
+  .mhead .ib{width:34px;height:34px;min-width:34px}.mhead .ib svg{width:17px;height:17px}
+  .mhead .mav .av{width:34px;height:34px;font-size:13px}
+  .mhead.hide{transform:translateY(calc(-100% + env(safe-area-inset-top,0px)));opacity:0;pointer-events:none}
+}
 
 </style>
 <div id="root"></div>
@@ -1222,6 +1233,8 @@ window.addEventListener('popstate', () => {
   const mo = [...document.querySelectorAll('.modal')].pop(); if (mo && mo._close) { mo._close(true); return; }
   if (ST.view) { NAV.open = false; ST.view = null; render(); window.scrollTo(0, 0); }
 });
+// el encabezado se esconde al bajar y vuelve al subir, para ganar espacio en el teléfono
+(() => { let y0 = 0; addEventListener('scroll', () => { const y = scrollY, h = document.querySelector('.mhead'); if (!h) return; if (y > y0 + 6 && y > 60) h.classList.add('hide'); else if (y < y0 - 6 || y < 30) h.classList.remove('hide'); y0 = y; }, { passive: true }); })();
 function render() {
   navSync();
   document.getElementById('root').innerHTML = shell();
