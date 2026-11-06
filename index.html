@@ -786,6 +786,13 @@ img,video,canvas,svg{max-width:100%}
 .pll .row .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .pll .row .tx small{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pll .row.on{outline:0;background:var(--card)}
+.cih{margin:16px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);display:flex;align-items:center;gap:6px}
+.cih svg{width:14px;height:14px}
+.cisrc{display:flex;flex-direction:column;margin:10px 0 4px}.cisrc small{color:var(--muted);font-size:12.5px}
+#ciL .row{width:100%;display:flex;align-items:center;gap:10px;text-align:left;font:inherit;color:var(--fg);background:var(--card);border:0;border-radius:12px;padding:10px 12px;margin-bottom:6px;cursor:pointer}
+#ciL .row .tx{flex:1;min-width:0;display:flex;flex-direction:column}#ciL .row small{color:var(--muted)}
+#ciL .pill{flex:none}.pill.ok{background:rgba(48,164,108,.15);color:var(--ok)}
+.ciprev{max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:12px}
 
 </style>
 <div id="root"></div>
@@ -979,6 +986,7 @@ const DemoDB = (() => {
     async deleteMember(id) { st.members = st.members.filter(m => m.id !== id); st.services.forEach(s => { s.team = s.team.filter(t => t.member_id !== id); }); save(); },
     async songs() { return clone(st.songs); },
     async links() { return {}; },
+    async chordSrc(q) { return q.task === 'pco_search' ? { configured: false } : { error: 'No disponible en la demostración' }; },
     async ia() { await new Promise(r => setTimeout(r, 600)); return 'En el modo de demostración el asistente no está conectado. En la app real responde Gemini con los datos de tus canciones y servicios.'; },
     async saveSong(s) { s.updated_at = new Date().toISOString(); if (!s.id || !st.songs.find(x => x.id === s.id)) { s.id = s.id || uid(); st.songs.push(s); } else Object.assign(st.songs.find(x => x.id === s.id), s); save(); return s; },
     async deleteSong(id) { st.songs = st.songs.filter(s => s.id !== id); st.services.forEach(s => { s.songs = s.songs.filter(x => x.song_id !== id); }); save(); },
@@ -1025,6 +1033,7 @@ const SupaDB = (cfg) => {
     },
     async sendCode(email) { await q(sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } })); },
     async signInPw(email, password) { const { error } = await sb.auth.signInWithPassword({ email, password }); if (error) throw new Error(/invalid/i.test(error.message) ? 'Correo o contraseña incorrectos. Si todavía no creaste tu contraseña, entra con código.' : error.message); },
+    async chordSrc(q) { const { data, error } = await sb.functions.invoke('asistente', { body: q }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } return data || {}; },
     async links(q) { try { const { data, error } = await sb.functions.invoke('asistente', { body: Object.assign({ task: 'links' }, q) }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} return { error: m }; } return data || {}; } catch (e) { return { error: e.message || String(e) }; } },
     async ia(body) { let { data, error } = await sb.functions.invoke('asistente', { body });
       if (error && /Failed to send|fetch/i.test(error.message || '')) { await new Promise(r => setTimeout(r, 1500)); ({ data, error } = await sb.functions.invoke('asistente', { body })); }
@@ -1763,7 +1772,7 @@ function studioBind(s, w, ta, h) {
     if (r.title && !$('#sT', w).value.trim()) $('#sT', w).value = r.title; if (r.artist && !$('#sA', w).value.trim()) $('#sA', w).value = r.artist;
     const sel = $('#sK', w), k = keyOpt(sel, r.key); if (k && !sel.value) { sel.value = k; h.kc(); } if (r.bpm && !$('#sB', w).value) { $('#sB', w).value = r.bpm; h.tg(); }
     if (r.ccli && (r.ccli.song || r.ccli.copyright)) s.meta = Object.assign({}, s.meta, { ccli: r.ccli });
-    if (r.chart && putChart(r.chart, 'lo del archivo')) msg(`Importado desde ${r.from}. Revisa con la vista previa.`); };
+    if (r.chart) applyImported(r.chart, r.key, 'archivo de ' + r.from); };
 
   // 5) revisar el cifrado con IA
   $('#sSecAI', w).onclick = async () => { const ch = ta.value.trim(); if (!ch) return toast('Primero pon la letra.'); const b = $('#sSecAI', w); b.disabled = true; msg('Pidiéndole a la IA que nombre las secciones…');
@@ -1773,7 +1782,25 @@ function studioBind(s, w, ta, h) {
     AI.msgs = []; openAI(`Revisa este cifrado de «${$('#sT', w).value.trim() || 'la canción'}» en tono ${$('#sK', w).value || '?'}${s.analysis ? ` (el análisis del audio dio ${s.analysis.key}, ${s.analysis.bpm} BPM)` : ''}: dime qué acordes no cuadran con el tono, si los nombres de las secciones están bien y devuélvemelo corregido.\n\n${ch}`, { title: 'Revisar cifrado con IA', task: 'chord', apply: v => { ta.value = v; refresh(); } }); };
   // 4) buscar un cifrado en internet: se abre en otra pestaña y lo pegas
   $('#sGo', w).onclick = () => { const t = $('#sT', w).value.trim(); if (!t) { $('#sT', w).focus(); return toast('Escribe primero el nombre de la canción.'); }
-    openChordSources(t, $('#sA', w).value.trim(), () => $('#sPaste', w).click()); };
+    openChordImport({ title: t, artist: $('#sA', w).value.trim(), selfId: s.id, apply: applyImported, file: () => $('#sImpF', w).click(), audio: () => $('#sAudF', w).click() }); };
+  // cifrado importado → vista previa sobre la letra guardada → aplicar al editor (se guarda con «Guardar»)
+  function applyImported(chart, fromKey, from) {
+    const songKey = $('#sK', w).value, fk = keyOpt($('#sK', w), fromKey) || fromKey || '';
+    const semi = songKey && fk && keyRootIdx(songKey) != null && keyRootIdx(fk) != null ? ((keyRootIdx(songKey) - keyRootIdx(fk)) % 12 + 18) % 12 - 6 : 0;
+    const lyr = ta.value.replace(/\[[^\]]*\]/g, m => isChord(m.slice(1, -1)) ? '' : m);
+    const hasLyrics = lyr.replace(/^\s*\[[^\]]+\]\s*$/gm, '').trim().length > 20;
+    const build = useNames => hasLyrics ? alignChordsToLyrics(chart, lyr, { semi, key: songKey, useSecNames: useNames }) : { chart: semi ? chart.replace(/\[([^\]]+)\]/g, (m, c) => isChord(c) ? `[${transChord(c.trim(), semi, useFlats(songKey))}]` : m) : chart, matched: 0, total: 0, missing: [] };
+    let res = build(true);
+    modal(`${ph('Importar cifrado')}<p class="hint" style="margin-top:0">Fuente: <b>${esc(from)}</b>${semi ? ` · los acordes se pasaron de ${esc(fk)} a ${esc(songKey)}` : ''}${hasLyrics ? '' : ' · la canción no tenía letra, así que se usa la del cifrado'}</p>
+      <p class="hint" id="ciRep"></p>${hasLyrics ? '<label class="sw" style="margin:4px 0 10px"><input type="checkbox" id="ciNames" checked> Usar los nombres de sección del cifrado</label>' : ''}
+      <div class="cprev ciprev" id="ciPrev"></div>
+      <div class="links"><span style="flex:1"></span><button class="btn primary" id="ciGo">Poner estos acordes</button></div>`, (w2, close2) => {
+      const draw = () => { $('#ciPrev', w2).innerHTML = `<article class="chart">${renderChart(res.chart, { key: songKey })}</article>`;
+        $('#ciRep', w2).innerHTML = hasLyrics ? `Tu letra no se cambia. Acordes puestos en <b>${res.matched} de ${res.total}</b> líneas.${res.missing.length ? ` Sin pareja en el cifrado: ${res.missing.slice(0, 3).map(x => '«' + esc(x.slice(0, 40)) + '»').join(', ')}${res.missing.length > 3 ? '…' : ''}` : ''}` : ''; };
+      const cb = $('#ciNames', w2); if (cb) cb.onchange = () => { res = build(cb.checked); draw(); };
+      $('#ciGo', w2).onclick = () => { ta.value = res.chart; refresh(); close2(); msg(`Acordes importados desde ${from}. Revísalos con la vista previa y dale «Guardar».`); if (h.pv.hidden && matchMedia('(min-width:760px)').matches) $('#sPrevT', w).click(); };
+      draw(); });
+  }
 }
 function openExport(s) {
   if (!s) return;
@@ -1878,6 +1905,148 @@ function openPlaylist(sid) {
         toast('Listo. Revisa que cada enlace sea la versión que tocan.', 4000); await reload(); draw(); };
     };
     draw();
+  });
+}
+
+/* ================= Motor de alineación: acordes importados → letra que ya está guardada =================
+   No cambia la letra: solo le pone encima los acordes del cifrado importado.
+   1) Se separan las líneas de las dos versiones (texto + acordes con su posición).
+   2) Las líneas se emparejan por contenido (palabras en común, en orden), no por el nombre de la sección:
+      primero en orden (alineación de secuencias) y después, para coros repetidos que el cifrado escribe una sola vez,
+      con la línea más parecida de todo el cifrado.
+   3) Dentro de cada línea se alinean las palabras (subsecuencia común más larga) y cada acorde cae
+      en la misma palabra y sílaba de la letra guardada. */
+const AL = {
+  words: t => { const out = []; const re = /\S+/g; let m; while ((m = re.exec(t))) out.push({ w: normT(m[0]).replace(/\s+/g, ''), at: m.index, len: m[0].length }); return out.filter(x => x.w || x.len); },
+  lines(chart) {
+    const out = []; let sec = '';
+    parseChart(chart).forEach(b => {
+      if (b.type === 'sec') { sec = b.name; return; }
+      if (b.type !== 'line') return;
+      let text = '', chords = [];
+      b.segs.forEach(sg => { if (sg.c && isChord(sg.c)) chords.push({ at: text.length, ch: sg.c }); text += sg.t || ''; });
+      out.push({ sec, text, chords, only: !text.trim() });
+    });
+    return out;
+  },
+  sim(a, b) { // parecido entre dos líneas: palabras en común en orden / largo de la más larga
+    const A = AL.words(a).map(x => x.w).filter(Boolean), B = AL.words(b).map(x => x.w).filter(Boolean); if (!A.length || !B.length) return 0;
+    const n = A.length, m = B.length, d = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = 1; i <= n; i++) for (let j = 1; j <= m; j++) d[i][j] = A[i - 1] === B[j - 1] ? d[i - 1][j - 1] + 1 : Math.max(d[i - 1][j], d[i][j - 1]);
+    return d[n][m] / Math.max(n, m);
+  },
+  wordMap(src, dst) { // índice de palabra del cifrado → índice de palabra de la letra guardada
+    const A = AL.words(src), B = AL.words(dst), n = A.length, m = B.length, d = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) d[i][j] = A[i].w && A[i].w === B[j].w ? d[i + 1][j + 1] + 1 : Math.max(d[i + 1][j], d[i][j + 1]);
+    const map = new Array(n).fill(-1); let i = 0, j = 0;
+    while (i < n && j < m) { if (A[i].w && A[i].w === B[j].w) { map[i] = j; i++; j++; } else if (d[i + 1][j] >= d[i][j + 1]) i++; else j++; }
+    // las palabras sin pareja se ubican por proporción entre sus vecinas emparejadas
+    for (let k = 0; k < n; k++) if (map[k] < 0) { let p = k - 1; while (p >= 0 && map[p] < 0) p--; let q = k + 1; while (q < n && map[q] < 0) q++;
+      const lo = p >= 0 ? map[p] : -1, hi = q < n ? map[q] : m; const span = hi - lo - 1;
+      map[k] = span > 0 ? Math.min(m - 1, lo + 1 + Math.floor((k - p - 1) * span / Math.max(1, q - p - 1))) : Math.max(0, Math.min(m - 1, lo >= 0 ? lo : 0)); }
+    return { A, B, map };
+  },
+  placeLine(src, dst) { // pone los acordes de la línea del cifrado sobre la línea guardada
+    if (!src.chords.length) return dst;
+    const { A, B, map } = AL.wordMap(src.text, dst); if (!B.length) return src.chords.map(c => `[${c.ch}]`).join(' ');
+    const ins = [];
+    src.chords.forEach(c => {
+      let wi = A.findIndex(w => c.at < w.at + w.len); // palabra donde cae el acorde
+      if (wi < 0) { ins.push({ at: dst.length, ch: c.ch, end: true }); return; }
+      const w = A[wi], off = Math.max(0, c.at - w.at), tw = B[map[wi]];
+      const at = c.at < w.at ? tw.at : tw.at + Math.min(off, Math.max(0, tw.len - 1));
+      ins.push({ at, ch: c.ch });
+    });
+    // si dos acordes caen en el mismo sitio se respeta el orden: el segundo pasa a la siguiente palabra
+    const used = new Set(); let out = dst; ins.sort((a, b) => a.at - b.at);
+    const starts = B.map(b => b.at);
+    ins.forEach(x => { if (used.has(x.at) && !x.end) { const nx = starts.find(s => s > x.at && !used.has(s)); if (nx != null) x.at = nx; } used.add(x.at); });
+    ins.sort((a, b) => b.at - a.at).forEach(x => { out = out.slice(0, x.at) + `[${x.ch}]` + (x.end && out.length === x.at ? '' : '') + out.slice(x.at); });
+    return out;
+  },
+};
+/**
+ * importedChart: cifrado en formato [G]palabra (de ChordPro, Planning Center, SongSelect, biblioteca…)
+ * lyricsChart:   la letra guardada (con o sin secciones; si ya tiene acordes se reemplazan solo los acordes)
+ * opts.semi:     semitonos para llevar los acordes al tono de la canción
+ * opts.useSecNames: usar los nombres de sección del cifrado cuando la mayoría de las líneas de un bloque vienen de esa sección
+ */
+function alignChordsToLyrics(importedChart, lyricsChart, opts = {}) {
+  const semi = opts.semi || 0, flats = useFlats(opts.key || ''), tr = c => semi ? transChord(c, semi, flats) : c;
+  const src = AL.lines(importedChart).map(l => Object.assign(l, { chords: l.chords.map(c => ({ at: c.at, ch: tr(c.ch) })) }));
+  const lyr = String(lyricsChart || '').replace(/\r/g, '').split('\n');
+  const dst = []; lyr.forEach((raw, i) => { const sec = /^\s*\[([^\]]+)\]\s*$/.exec(raw); if (sec && !isChord(sec[1])) return dst.push({ i, sec: sec[1] });
+    const text = raw.replace(/\[[^\]]*\]/g, ''); if (!text.trim()) return; if (!/\[[^\]]*\]/.test(raw) || text.trim()) dst.push({ i, text }); });
+  const L = dst.filter(x => x.text != null), S = src.filter(x => !x.only && x.text.trim());
+  // 1) alineación en orden (como un diff de líneas)
+  const n = L.length, m = S.length, sc = Array.from({ length: n }, (_, i) => S.map(s => AL.sim(s.text, L[i].text)));
+  const D = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) D[i][j] = Math.max(D[i + 1][j], D[i][j + 1], sc[i][j] >= 0.45 ? D[i + 1][j + 1] + sc[i][j] : -1);
+  const pair = new Array(n).fill(-1); { let i = 0, j = 0; while (i < n && j < m) { if (sc[i][j] >= 0.45 && D[i][j] === D[i + 1][j + 1] + sc[i][j]) { pair[i] = j; i++; j++; } else if (D[i + 1][j] >= D[i][j + 1]) i++; else j++; } }
+  // 2) líneas repetidas (coro escrito una sola vez en el cifrado): la más parecida de todo el cifrado
+  for (let i = 0; i < n; i++) if (pair[i] < 0) { let best = -1, bv = 0.6; sc[i].forEach((v, j) => { if (v > bv) { bv = v; best = j; } }); pair[i] = best; }
+  // 3) escribir: misma letra, acordes encima
+  const out = lyr.slice(); let matched = 0; const miss = [];
+  L.forEach((l, k) => { const s = pair[k] >= 0 ? S[pair[k]] : null; if (s) { matched++; out[l.i] = AL.placeLine(s, l.text); } else { out[l.i] = l.text; if (l.text.trim()) miss.push(l.text.trim()); } });
+  // nombres de sección: si la mayoría de las líneas de un bloque vienen de una sección del cifrado con otro nombre
+  if (opts.useSecNames) {
+    const secRows = dst.filter(x => x.sec != null);
+    secRows.forEach((h, k) => { const end = k + 1 < secRows.length ? secRows[k + 1].i : lyr.length;
+      const names = {}; L.forEach((l, q) => { if (l.i > h.i && l.i < end && pair[q] >= 0 && S[pair[q]].sec) names[S[pair[q]].sec] = (names[S[pair[q]].sec] || 0) + 1; });
+      const top = Object.entries(names).sort((a, b) => b[1] - a[1])[0]; if (top && normT(top[0]) !== normT(h.sec)) out[h.i] = `[${secEs(top[0]) || top[0]}]`; });
+  }
+  // secciones solo de acordes del cifrado (intro, instrumental) que la letra no tiene: se ponen en su lugar
+  const onlyBlocks = []; let cur = null; src.forEach((l, j) => { if (l.only && l.chords.length) { if (!cur || cur.sec !== l.sec) { cur = { sec: l.sec, rows: [], before: null }; onlyBlocks.push(cur); } cur.rows.push(l.chords.map(c => `[${c.ch}]`).join(' ')); } else if (!l.only) { if (cur && cur.before == null) cur.before = S.indexOf(l); cur = null; } });
+  let res = out.join('\n');
+  const hasSec = name => new RegExp('^\\s*\\[' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[^\\]]*\\]\\s*$', 'mi').test(res);
+  const inserts = [];
+  onlyBlocks.forEach(b => { const name = secEs(b.sec) || b.sec || 'Instrumental'; if (hasSec(name)) return;
+    const k = b.before != null ? pair.indexOf(b.before) : -1; const at = k >= 0 ? L[k].i : lyr.length;
+    // si la línea de destino es la primera de una sección, se inserta antes del título de esa sección
+    let row = at; while (row > 0 && !String(out[row - 1]).trim()) row--; if (row > 0 && /^\s*\[[^\]]+\]\s*$/.test(out[row - 1]) && !isChord(out[row - 1].replace(/[\[\]\s]/g, ''))) row--;
+    inserts.push({ row: k >= 0 ? row : lyr.length, txt: `[${name}]\n${b.rows.join('\n')}\n` }); });
+  if (inserts.length) { const rows = out.slice(); inserts.sort((a, b) => b.row - a.row).forEach(x => rows.splice(x.row, 0, ...x.txt.split('\n'))); res = rows.join('\n'); }
+  return { chart: res.replace(/\n{3,}/g, '\n\n').trim(), matched, total: L.filter(l => l.text.trim()).length, missing: miss };
+}
+
+
+/* ================= Buscador de cifrados: fuentes que importan de verdad y fuentes que solo se pueden ver ================= */
+async function chordSearch(title, artist, selfId) {
+  const nt = normT(title), res = { lib: [], pco: null };
+  // 1) Biblioteca de la iglesia (RF App): otras canciones o versiones con el mismo nombre que ya tienen acordes
+  res.lib = (ST.songs || []).filter(x => x.id !== selfId && /\[[A-G][^\]]*\]/.test(x.chart || '') && (normT(x.title) === nt || normT(x.title).includes(nt) || nt.includes(normT(x.title))))
+    .map(x => ({ src: 'Biblioteca RF', title: x.title, artist: x.artist || '', key: x.key || '', get: async () => ({ chart: x.chart, key: x.key }) }));
+  // 2) Planning Center Services (donde llegan los cifrados de SongSelect): solo si la iglesia lo conectó
+  try { const r = await DB.chordSrc({ task: 'pco_search', title, artist }); res.pco = r; } catch (e) { res.pco = { error: e.message }; }
+  return res;
+}
+function openChordImport(o) {
+  const row = (r, i, kind) => `<button type="button" class="row click" data-ci="${kind}:${i}"><span class="tx"><b>${esc(r.title)}</b><small>${[r.artist, r.name, r.key ? 'tono ' + r.key : '', r.src].filter(Boolean).map(esc).join(' · ')}</small></span><span class="pill ok">Importa</span></button>`;
+  modal(`${ph('Importar cifrado · ' + esc(o.title))}<div id="ciL"><div class="empty"><span class="spin"></span>Buscando en las fuentes…</div></div>`, async (w, close) => {
+    const R = await chordSearch(o.title, o.artist, o.selfId), L = $('#ciL', w); const pcoRows = (R.pco && R.pco.results) || [];
+    const pcoNote = !R.pco || R.pco.configured === false ? 'No conectado. Si la iglesia usa Planning Center Services (ahí se guardan los cifrados de SongSelect), se conecta con una clave y los cifrados se importan solos.' : R.pco.error ? 'Error: ' + esc(R.pco.error) : pcoRows.length ? '' : 'No hay esta canción en Planning Center.';
+    L.innerHTML = `
+      <h4 class="cih">Se importan solos ${ic('check')}</h4>
+      <div class="cisrc"><b>Biblioteca de la iglesia</b><small>Canciones de RF App que ya tienen acordes</small></div>
+      <div class="list">${R.lib.length ? R.lib.map((r, i) => row(r, i, 'lib')).join('') : '<p class="hint">No hay otra versión con acordes en la biblioteca.</p>'}</div>
+      <div class="cisrc"><b>Planning Center · SongSelect</b><small>Arreglos con cifrado de la cuenta de la iglesia</small></div>
+      <div class="list">${pcoRows.map((r, i) => row(r, i, 'pco')).join('')}${pcoNote ? `<p class="hint">${pcoNote}</p>` : ''}</div>
+      <div class="cisrc"><b>Archivo descargado</b><small>SongSelect (ChordPro / .usr), Worship Together (ChordPro), OnSong u otro .cho / .txt</small></div>
+      <div class="list"><button type="button" class="row click" data-cifile><span class="tx"><b>Escoger archivo</b><small>Se leen los acordes y se ponen sobre tu letra</small></span><span class="pill ok">Importa</span></button></div>
+      <h4 class="cih">Solo se pueden ver</h4>
+      <p class="hint">Estas páginas no tienen una forma autorizada de importar (no dan API y sus reglas prohíben copiarlas con programas). Se abren en una ventana para verlas.</p>
+      <div class="list">${CHORD_SITES.map(([n, d], i) => `<button type="button" class="row click" data-cs="${i}"><span class="tx"><b>${esc(n)}</b><small>${d || 'todas las páginas'}</small></span><span class="pill">Solo ver</span></button>`).join('')}</div>
+      <h4 class="cih">Si no aparece en ningún lado</h4>
+      <div class="list"><button type="button" class="row click" data-ciaudio><span class="tx"><b>Sacar acordes de una grabación</b><small>MP3, WAV o M4A de esta versión: propone los acordes y tú corriges</small></span><span class="pill">Propuesta</span></button></div>`;
+    const go = async (kind, i) => { const r = kind === 'lib' ? R.lib[i] : pcoRows[i]; L.style.opacity = .5;
+      try { let got; if (kind === 'lib') got = await r.get(); else { const d = await DB.chordSrc({ task: 'pco_get', song_id: r.song_id, arrangement_id: r.id }); if (d.error) throw new Error(d.error); got = { chart: importSongFile('pco.txt', d.chord_chart || '').chart, key: d.key }; }
+        if (!got.chart || !/\[[A-G]/.test(got.chart)) throw new Error('Esa versión no trae acordes.');
+        close(); o.apply(got.chart, got.key, r.src + (r.name ? ' · ' + r.name : '')); }
+      catch (e) { L.style.opacity = 1; toast(e.message || 'No se pudo importar', 5000); } };
+    $$('[data-ci]', w).forEach(b => b.onclick = () => { const [k, i] = b.dataset.ci.split(':'); go(k, +i); });
+    $$('[data-cs]', w).forEach(b => b.onclick = () => { const [, d] = CHORD_SITES[+b.dataset.cs]; openWeb(chordSiteUrl(o.title, o.artist, d)); });
+    $('[data-cifile]', w).onclick = () => { close(); o.file(); };
+    $('[data-ciaudio]', w).onclick = () => { close(); o.audio(); };
   });
 }
 
@@ -2489,7 +2658,7 @@ function editSong(id, after) {
           <div class="etr"><span class="etl">Acorde</span><div class="cbar" id="sCk" aria-label="Acordes del tono"></div></div>
         </div>
         <div class="ebody"><textarea class="in chartin" id="sC" spellcheck="false" placeholder="Toca una sección para empezar y escribe la letra. Para un acorde, pon el cursor justo antes de la sílaba y toca el acorde.&#10;&#10;[Verso 1]&#10;[G]Cuando sale el [D]sol…">${esc(s.chart || '')}</textarea><div class="cprev" id="sPrev" hidden></div></div>
-        <div class="efoot"><button type="button" class="btn small primary" id="sAud">${ic('audio')}Sacar acordes del audio</button><input type="file" id="sAudF" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado</button><button type="button" class="btn small ghost" id="sImp">Importar archivo</button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,.usr,text/plain" hidden><button type="button" class="btn small ghost" id="sGo">Buscar cifrado en internet</button><button type="button" class="btn small ghost" id="sAI">${ic('spark')}Revisar con IA</button><button type="button" class="btn small ghost" id="sSecAI">${ic('spark')}Nombrar secciones</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
+        <div class="efoot"><button type="button" class="btn small primary" id="sAud">${ic('audio')}Sacar acordes del audio</button><input type="file" id="sAudF" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado</button><button type="button" class="btn small ghost" id="sImp">Importar archivo</button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,.usr,text/plain" hidden><button type="button" class="btn small primary" id="sGo">${ic('search')}Importar cifrado</button><button type="button" class="btn small ghost" id="sAI">${ic('spark')}Revisar con IA</button><button type="button" class="btn small ghost" id="sSecAI">${ic('spark')}Nombrar secciones</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
       </div></div></div>
     <div class="links">${id && isDir() ? `<button class="btn ghost danger" data-del>${ic('trash')}Eliminar</button>` : ''}<span style="flex:1"></span><button class="btn primary" id="sSave">Guardar</button></div>`, (w, close) => {
     const ta = $('#sC', w);
