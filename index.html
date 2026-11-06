@@ -672,6 +672,20 @@ textarea.chartin{min-height:240px;font-family:ui-monospace,SFMono-Regular,Menlo,
 }
 .spr .sheet-top h1,.spr .top h1{font-size:clamp(28px,2.4vw,38px);line-height:1.08}
 
+/* etiquetas */
+.tgs{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}.tgs:empty{display:none}
+.tg{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--card2);color:var(--muted);line-height:1.5}
+.tg.t-rapida{background:color-mix(in srgb,#F08A6E 18%,transparent);color:#E2775A}
+.tg.t-moderada{background:color-mix(in srgb,#E9C47A 22%,transparent);color:#B8892F}
+.tg.t-lenta{background:color-mix(in srgb,#7AA7FF 20%,transparent);color:#5B86E0}
+.chip.tagc.on{background:var(--btn);color:var(--btn-ink);border-color:transparent}
+.chip.tagc.on.auto{opacity:.65}
+.cbar.wrapc{flex-wrap:wrap;overflow:visible}
+.tsep{width:1px;align-self:stretch;background:var(--line2);margin:2px 4px;flex:none}
+.tagbar{margin-top:-4px}
+@media (min-width:920px){.panel.xl .sedit-f .tagf{grid-column:1/-1}}
+.tagbar .chip{padding:6px 12px;font-size:12.5px;font-weight:500}
+
 </style>
 <div id="root"></div>
 <script>
@@ -1277,7 +1291,7 @@ const initials = n => String(n || '?').replace(/\(.*?\)/g, '').trim().split(/\s+
 const gcal = (title, start, mins, place, details) => { const f = d => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); const e = new Date(start.getTime() + mins * 6e4); return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${f(start)}/${f(e)}&location=${encodeURIComponent(place || '')}&details=${encodeURIComponent(details || '')}`; };
 
 let DB = DemoDB;
-const ST = { tab: 'home', view: null, members: [], songs: [], services: [], notices: [], songFilter: '', songSeg: 'all', sheet: { semi: 0, mode: null, big: false }, live: null };
+const ST = { tab: 'home', view: null, members: [], songs: [], services: [], notices: [], songFilter: '', songSeg: 'all', songTagF: [], sheet: { semi: 0, mode: null, big: false }, live: null };
 let toastT;
 function toast(msg, ms = 2600) { let t = $('#toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); document.body.append(t); } t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms); }
 const me = () => DB.me() || {};
@@ -1521,14 +1535,24 @@ function viewService(id) {
 }
 
 /* ---------- Canciones ---------- */
+/* ---------- etiquetas: rápida / moderada / lenta (sale sola del tempo) y las que quieran ---------- */
+const TAG_TEMPO = ['Rápida', 'Moderada', 'Lenta'];
+const TAG_BASE = ['Adoración', 'Celebración', 'Apertura', 'Ofrenda', 'Cierre', 'Himno', 'Navidad'];
+const tempoTag = bpm => !bpm ? '' : +bpm >= 115 ? 'Rápida' : +bpm >= 85 ? 'Moderada' : 'Lenta';
+function songTags(s) { const t = (s.tags || []).slice(); if (!t.some(x => TAG_TEMPO.includes(x))) { const a = tempoTag(s.bpm); if (a) t.unshift(a); } return t; }
+function allTags() { const used = new Set(); ST.songs.forEach(s => songTags(s).forEach(t => used.add(t))); return [...TAG_TEMPO, ...TAG_BASE.filter(t => used.has(t)), ...[...used].filter(t => !TAG_TEMPO.includes(t) && !TAG_BASE.includes(t)).sort((a, b) => a.localeCompare(b, 'es'))]; }
+const tagMatch = (s, sel) => !sel.length || sel.every(t => songTags(s).includes(t));
+const tagPills = s => songTags(s).slice(0, 3).map(t => `<span class="tg${TAG_TEMPO.includes(t) ? ' t-' + t.normalize('NFD').replace(/[^a-z]/gi, '').toLowerCase() : ''}">${esc(t)}</span>`).join('');
+const tagBar = (sel, attr) => `<div class="cbar tagbar" aria-label="Filtrar por etiqueta">${allTags().map(t => `<button type="button" class="chip tagc${sel.includes(t) ? ' on' : ''}" ${attr}="${esc(t)}">${esc(t)}</button>`).join('')}${sel.length ? `<button type="button" class="chip" ${attr}="">Quitar filtros</button>` : ''}</div>`;
 function viewSongs() {
   const q = ST.songFilter.trim().toLowerCase();
-  const list = ST.songs.filter(s => !q || (s.title + ' ' + (s.artist || '')).toLowerCase().includes(q)).filter(s => ST.songSeg === 'all' || (ST.songSeg === 'nopb' ? !s.from_playback : ST.songSeg === 'chart' ? /\[[A-G]/.test(s.chart || '') : !/\[[A-G]/.test(s.chart || ''))).sort((a, b) => a.title.localeCompare(b.title, 'es'));
+  const list = ST.songs.filter(s => !q || (s.title + ' ' + (s.artist || '')).toLowerCase().includes(q)).filter(s => ST.songSeg === 'all' || (ST.songSeg === 'nopb' ? !s.from_playback : ST.songSeg === 'chart' ? /\[[A-G]/.test(s.chart || '') : !/\[[A-G]/.test(s.chart || ''))).filter(s => tagMatch(s, ST.songTagF)).sort((a, b) => a.title.localeCompare(b.title, 'es'));
   return `<div class="wrap">${demoBar()}${topBar('Canciones', `${ST.songs.length} en la base de datos`, `<button class="btn primary" data-act="newsong">${ic('plus')}Canción</button>`)}
     <div class="top" style="gap:10px"><label class="search">${ic('search')}<input id="songQ" placeholder="Buscar por nombre o artista" value="${esc(ST.songFilter)}" autocomplete="off"></label>
       <div class="seg"><button class="${ST.songSeg === 'all' ? 'on' : ''}" data-seg="all">Todas</button><button class="${ST.songSeg === 'chart' ? 'on' : ''}" data-seg="chart">Con cifrado</button><button class="${ST.songSeg === 'nochart' ? 'on' : ''}" data-seg="nochart">Sin cifrado</button><button class="${ST.songSeg === 'nopb' ? 'on' : ''}" data-seg="nopb">Sin playback</button></div></div>
+    ${tagBar(ST.songTagF, 'data-tagf')}
     <div class="card list">${list.length ? list.map(s => { const lu = lastUsed(s.id); const hasC = /\[[A-G]/.test(s.chart || '');
-      return `<div class="row click" data-song="${s.id}"><span class="keyb">${esc(s.key || '—')}</span><div class="tx"><b>${esc(s.title)}</b><small>${esc(s.artist || '')}${s.bpm ? ' · ' + s.bpm + ' BPM' : ''}${lu ? ' · última vez ' + dShort.format(lu) : ''}</small></div>${hasC ? '<span class="pill gold">Cifrado</span>' : s.chart ? '<span class="pill">Letra</span>' : ''}${s.from_playback ? '<span class="pill" title="Tiene secuencia en RF Playback">Playback</span>' : '<span class="pill warn">Falta el playback</span>'}</div>`; }).join('') : '<div class="empty">No encontré canciones con ese nombre.</div>'}</div></div>`;
+      return `<div class="row click" data-song="${s.id}"><span class="keyb">${esc(s.key || '—')}</span><div class="tx"><b>${esc(s.title)}</b><small>${esc(s.artist || '')}${s.bpm ? ' · ' + s.bpm + ' BPM' : ''}${lu ? ' · última vez ' + dShort.format(lu) : ''}</small><span class="tgs">${tagPills(s)}</span></div>${hasC ? '<span class="pill gold">Cifrado</span>' : s.chart ? '<span class="pill">Letra</span>' : ''}${s.from_playback ? '<span class="pill" title="Tiene secuencia en RF Playback">Playback</span>' : '<span class="pill warn">Falta el playback</span>'}</div>`; }).join('') : `<div class="empty">${ST.songTagF.length ? 'Ninguna canción tiene esas etiquetas juntas.' : 'No encontré canciones con ese nombre.'}</div>`}</div></div>`;
 }
 function viewSong(id) {
   const s = song(id); if (!s) return '<div class="wrap"><div class="empty">Esta canción ya no existe.</div></div>';
@@ -1788,13 +1812,14 @@ function modal(html, onBind) {
 }
 const ph = t => `<div class="ph"><h2>${t}</h2><button class="ib" data-x aria-label="Cerrar">${ic('x')}</button></div>`;
 function chooseSongs(sid) {
-  const s = ST.services.find(x => x.id === sid); let list = s.songs.map(x => Object.assign({}, x)); let q = '';
-  modal(`${ph('Repertorio · ' + cap(dShort.format(pD(s.date))))}<div class="list setl" id="chSet"></div><label class="search">${ic('search')}<input id="chQ" placeholder="Buscar en las ${ST.songs.length} canciones" autocomplete="off"></label><div class="list" id="chRes" style="max-height:38vh;overflow:auto"></div>
+  const s = ST.services.find(x => x.id === sid); let list = s.songs.map(x => Object.assign({}, x)); let q = '', tf = [];
+  modal(`${ph('Repertorio · ' + cap(dShort.format(pD(s.date))))}<div class="list setl" id="chSet"></div><label class="search">${ic('search')}<input id="chQ" placeholder="Buscar en las ${ST.songs.length} canciones" autocomplete="off"></label><div id="chTags"></div><div class="list" id="chRes" style="max-height:38vh;overflow:auto"></div>
     <div class="links"><button class="btn ghost" data-newsong>${ic('plus')}Agregar canción nueva</button><span style="flex:1"></span><button class="btn primary" id="chSave">Guardar repertorio</button></div>`, (w, close) => {
     const draw = () => {
       $('#chSet', w).innerHTML = list.length ? list.map((x, i) => { const so = song(x.song_id) || {}; return `<div class="row"><span class="pos">${i + 1}</span><select class="in" style="width:76px" data-k="${i}" aria-label="Tono">${[so.key].concat(['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'].filter(k => k !== so.key)).filter(Boolean).map(k => `<option${k === (x.key || so.key) ? ' selected' : ''}>${k}</option>`).join('')}</select><div class="tx"><b>${esc(so.title)}</b><select class="in" style="margin-top:4px;padding:5px 8px;font-size:12.5px" data-lead="${i}" aria-label="Quién la canta"><option value="">¿Quién la canta?</option>${s.team.filter(t => VOICE(t.role)).map(t => mem(t.member_id)).filter(Boolean).map(m => `<option value="${m.id}"${m.id === x.lead_id ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div><div class="links"><button class="ib" data-mv="${i}:-1" aria-label="Subir">${ic('up')}</button><button class="ib" data-mv="${i}:1" aria-label="Bajar">${ic('down')}</button><button class="ib" data-rm="${i}" aria-label="Quitar">${ic('x')}</button></div></div>`; }).join('') : '<p class="hint">Toca una canción de abajo para agregarla.</p>';
       const inSet = new Set(list.map(x => x.song_id)); const ql = q.toLowerCase();
-      $('#chRes', w).innerHTML = ST.songs.filter(so => !inSet.has(so.id) && (!ql || (so.title + ' ' + so.artist).toLowerCase().includes(ql))).sort((a, b) => a.title.localeCompare(b.title, 'es')).slice(0, 60).map(so => { const lu = lastUsed(so.id); return `<div class="row click" data-add="${so.id}"><span class="keyb">${esc(so.key || '—')}</span><div class="tx"><b>${esc(so.title)}</b><small>${esc(so.artist || '')}${lu ? ` · se cantó ${dShort.format(lu)}` : ''}${so.from_playback ? '' : ' · <span style="color:var(--warn)">sin playback</span>'}</small></div>${ic('plus', '')}</div>`; }).join('') || '<p class="hint">Nada con ese nombre. Agrégala como canción nueva.</p>';
+      $('#chTags', w).innerHTML = tagBar(tf, 'data-chtag'); $$('[data-chtag]', w).forEach(b => b.onclick = () => { const t = b.dataset.chtag; tf = !t ? [] : tf.includes(t) ? tf.filter(x => x !== t) : tf.concat(t); draw(); });
+      $('#chRes', w).innerHTML = ST.songs.filter(so => !inSet.has(so.id) && tagMatch(so, tf) && (!ql || (so.title + ' ' + so.artist).toLowerCase().includes(ql))).sort((a, b) => a.title.localeCompare(b.title, 'es')).slice(0, 60).map(so => { const lu = lastUsed(so.id); return `<div class="row click" data-add="${so.id}"><span class="keyb">${esc(so.key || '—')}</span><div class="tx"><b>${esc(so.title)}</b><small>${esc(so.artist || '')}${lu ? ` · se cantó ${dShort.format(lu)}` : ''}${so.from_playback ? '' : ' · <span style="color:var(--warn)">sin playback</span>'}</small><span class="tgs">${tagPills(so)}</span></div>${ic('plus', '')}</div>`; }).join('') || `<p class="hint">${tf.length ? 'Ninguna canción tiene esas etiquetas juntas.' : 'Nada con ese nombre. Agrégala como canción nueva.'}</p>`;
       $$('[data-add]', w).forEach(r => r.onclick = () => { const so = song(r.dataset.add); list.push({ song_id: so.id, key: so.key, lead_id: (s.team.find(t => t.member_id === me().id && VOICE(t.role)) || {}).member_id || '', notes: '' }); draw(); });
       $$('[data-mv]', w).forEach(b => b.onclick = () => { const [i, d] = b.dataset.mv.split(':').map(Number); const j = i + d; if (j < 0 || j >= list.length) return; [list[i], list[j]] = [list[j], list[i]]; draw(); });
       $$('[data-rm]', w).forEach(b => b.onclick = () => { list.splice(+b.dataset.rm, 1); draw(); });
@@ -1813,6 +1838,7 @@ function editSong(id, after) {
     <div class="fgrid"><div class="field"><label for="sK">Tono</label><select class="in" id="sK"><option value="">—</option>${['C', 'C#', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B', 'Cm', 'C#m', 'Dm', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'Bbm', 'Bm'].map(k => `<option${k === s.key ? ' selected' : ''}>${k}</option>`).join('')}</select></div><div class="field"><label for="sB">Tempo (BPM)</label><input class="in" id="sB" type="number" inputmode="numeric" value="${esc(s.bpm || '')}"></div></div>
     <div class="field"><label for="sY">Versión original en YouTube</label><input class="in" id="sY" value="${esc(s.youtube || '')}" placeholder="https://youtube.com/…"></div>
     <div class="field"><label for="sS">Versión original en Spotify</label><input class="in" id="sS" value="${esc(s.spotify || '')}" placeholder="https://open.spotify.com/track/…"></div>
+    <div class="field tagf"><label>Etiquetas <span class="hint" style="font-weight:400">· para filtrar y escoger más rápido</span></label><div class="cbar wrapc" id="sTg"></div></div>
     </div><div class="field sedit-c"><label for="sC">Letra con acordes</label>
       <div class="cbar" aria-label="Secciones">${['Intro', 'Verso', 'Pre-coro', 'Coro', 'Puente', 'Instrumental', 'Final'].map(x => `<button type="button" class="chip sec" data-sec="${x}">+ ${x}</button>`).join('')}</div>
       <div class="cbar" id="sCk" aria-label="Acordes del tono"></div>
@@ -1838,6 +1864,16 @@ function editSong(id, after) {
       $$('[data-ch]', w).forEach(bt => bt.onmousedown = e => e.preventDefault());
       $$('[data-ch]', w).forEach(bt => bt.onclick = () => { let c = bt.dataset.ch; if (c === '?') { c = (prompt('¿Qué acorde? (ej.: Bm7, C/E, Gsus4)') || '').trim(); if (!c) return; } put('[' + c + ']'); }); };
     $('#sK', w).addEventListener('change', () => { kc(); prev(); }); kc();
+    // etiquetas: el ritmo sale del tempo si no escoges uno; las demás se prenden y apagan; «+ Otra» crea una nueva
+    let tags = (s.tags || []).slice(); const extra = new Set([...TAG_BASE, ...allTags().filter(t => !TAG_TEMPO.includes(t))]); tags.forEach(t => { if (!TAG_TEMPO.includes(t)) extra.add(t); });
+    const tg = () => { const auto = tags.some(t => TAG_TEMPO.includes(t)) ? '' : tempoTag($('#sB', w).value);
+      $('#sTg', w).innerHTML = TAG_TEMPO.map(t => `<button type="button" class="chip tagc${tags.includes(t) ? ' on' : t === auto ? ' on auto' : ''}" data-tg="${t}"${t === auto ? ' title="Sale del tempo. Tócala para fijarla."' : ''}>${t}</button>`).join('') + '<span class="tsep"></span>' +
+        [...extra].map(t => `<button type="button" class="chip tagc${tags.includes(t) ? ' on' : ''}" data-tg="${esc(t)}">${esc(t)}</button>`).join('') + '<button type="button" class="chip" data-tg="+">+ Otra</button>';
+      $$('[data-tg]', w).forEach(b => { b.onmousedown = e => e.preventDefault(); b.onclick = () => { let t = b.dataset.tg;
+        if (t === '+') { t = (prompt('Nombre de la etiqueta (ej.: Pentecostés, Niños, Jóvenes)') || '').trim().replace(/\s+/g, ' '); if (!t) return; t = t[0].toUpperCase() + t.slice(1); extra.add(t); if (!tags.includes(t)) tags.push(t); return tg(); }
+        if (TAG_TEMPO.includes(t)) { const had = tags.includes(t); tags = tags.filter(x => !TAG_TEMPO.includes(x)); if (!had) tags.push(t); }
+        else tags = tags.includes(t) ? tags.filter(x => x !== t) : tags.concat(t); tg(); }; }); };
+    $('#sB', w).addEventListener('input', tg); tg();
     $$('[data-sec]', w).forEach(bt => bt.onmousedown = e => e.preventDefault());
     // vista previa mientras escribes
     const pv = $('#sPrev', w), prev = () => { if (pv.hidden) return; const v = looksChordsOver(ta.value) ? fromChordsOver(ta.value) : ta.value; pv.innerHTML = v.trim() ? `<article class="chart">${renderChart(v, { key: $('#sK', w).value })}</article>` : '<p class="hint">Todavía no hay letra.</p>'; };
@@ -1857,7 +1893,7 @@ function editSong(id, after) {
     $('#sSave', w).onclick = async () => {
       const t = $('#sT', w).value.trim(); if (!t) { $('#sT', w).focus(); toast('Ponle nombre a la canción.'); return; }
       let ch = ta.value; if (looksChordsOver(ch)) ch = fromChordsOver(ch);
-      Object.assign(s, { title: t, artist: $('#sA', w).value.trim(), key: $('#sK', w).value, bpm: +$('#sB', w).value || null, youtube: $('#sY', w).value.trim(), spotify: $('#sS', w).value.trim(), chart: ch });
+      Object.assign(s, { title: t, artist: $('#sA', w).value.trim(), key: $('#sK', w).value, bpm: +$('#sB', w).value || null, youtube: $('#sY', w).value.trim(), spotify: $('#sS', w).value.trim(), chart: ch, tags });
       if (!s.youtube && !s.spotify) toast('Recuerda agregar el enlace de la versión original para que el equipo la pueda sacar.', 4000); else if (!id) toast('Canción agregada. Queda pendiente cargar su playback en RF Playback.', 4000);
       const saved = await DB.saveSong(s); close(); await reload(); after && after(saved || s);
     };
@@ -1937,6 +1973,7 @@ function bind(m) {
   on('[data-semi]', e => { const d = +e.dataset.semi; ST.sheet.semi = d === 0 ? 0 : ((ST.sheet.semi + d + 18) % 12) - 6; render(); });
   on('[data-big]', () => { ST.sheet.big = !ST.sheet.big; render(); });
   on('[data-seg]', e => { ST.songSeg = e.dataset.seg; render(); });
+  on('[data-tagf]', e => { const t = e.dataset.tagf; if (!t) ST.songTagF = []; else ST.songTagF = ST.songTagF.includes(t) ? ST.songTagF.filter(x => x !== t) : ST.songTagF.concat(t); render(); });
   const q = $('#songQ', m); if (q) q.oninput = e => { ST.songFilter = e.target.value; const p = e.target.selectionStart; render(); const n = $('#songQ'); n.focus(); n.setSelectionRange(p, p); };
   on('[data-lmode]', e => { ST.live = ST.live || { sid: upcoming()[0].id, i: 0, line: -1, sec: 0, beat: 3, play: false }; ST.live.mode = e.dataset.lmode; render(); });
   on('[data-livesong]', e => { const s = upcoming()[0]; ST.live = Object.assign(ST.live || {}, { sid: s.id, i: +e.dataset.livesong, line: -1, sec: 0, beat: 3 }); render(); });
