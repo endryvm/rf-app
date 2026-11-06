@@ -1013,7 +1013,7 @@ const SupaDB = (cfg) => {
     },
     async sendCode(email) { await q(sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } })); },
     async signInPw(email, password) { const { error } = await sb.auth.signInWithPassword({ email, password }); if (error) throw new Error(/invalid/i.test(error.message) ? 'Correo o contraseña incorrectos. Si todavía no creaste tu contraseña, entra con código.' : error.message); },
-    async ia(body) { const { data, error } = await sb.functions.invoke('ia', { body }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } if (data && data.error) throw new Error(data.error); return data.text; },
+    async ia(body) { const { data, error } = await sb.functions.invoke('asistente', { body }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } if (data && data.error) throw new Error(data.error); return data.text; },
     async drive(action, extra) { const { data, error } = await sb.functions.invoke('drive', { body: Object.assign({ action }, extra || {}) }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } if (data && data.error) throw new Error(data.error); return data; },
     async setPassword(password) { await q(sb.auth.updateUser({ password })); },
     async verify(email, token) { await q(sb.auth.verifyOtp({ email, token, type: 'email' })); },
