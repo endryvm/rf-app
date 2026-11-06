@@ -742,6 +742,16 @@ html{touch-action:manipulation;-webkit-text-size-adjust:100%}
 .panel.xl .sedit-f .smeta{grid-column:span 2;margin:0 0 12px}
 .sfind b{font-size:15px;color:var(--fg);display:block}
 .sfind svg{stroke:currentColor;fill:none;stroke-width:2}
+.aich{display:flex;flex-direction:column;gap:10px;max-height:52vh;overflow:auto;margin-bottom:10px}
+.aich:empty{display:none}
+.aim{padding:10px 13px;border-radius:14px;line-height:1.5;max-width:92%;font-size:15px}
+.aim.user{align-self:flex-end;background:var(--btn);color:var(--btn-ink)}
+.aim.model{align-self:flex-start;background:var(--card);color:var(--fg)}
+.aim .btn{margin-top:8px}
+.aisug{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.aisug .chip{height:auto;padding:8px 12px;white-space:normal;text-align:left}
+.aiin{display:flex;gap:8px;align-items:flex-end}
+.aiin textarea{flex:1;resize:vertical;min-height:48px}
 
 </style>
 <div id="root"></div>
@@ -934,6 +944,7 @@ const DemoDB = (() => {
     async saveMember(m) { if (!m.id) { m.id = uid(); m.color = m.color || COLORS[st.members.length % COLORS.length]; st.members.push(m); } else Object.assign(st.members.find(x => x.id === m.id) || {}, m); save(); return m; },
     async deleteMember(id) { st.members = st.members.filter(m => m.id !== id); st.services.forEach(s => { s.team = s.team.filter(t => t.member_id !== id); }); save(); },
     async songs() { return clone(st.songs); },
+    async ia() { await new Promise(r => setTimeout(r, 600)); return 'En el modo de demostración el asistente no está conectado. En la app real responde Gemini con los datos de tus canciones y servicios.'; },
     async saveSong(s) { s.updated_at = new Date().toISOString(); if (!s.id || !st.songs.find(x => x.id === s.id)) { s.id = s.id || uid(); st.songs.push(s); } else Object.assign(st.songs.find(x => x.id === s.id), s); save(); return s; },
     async deleteSong(id) { st.songs = st.songs.filter(s => s.id !== id); st.services.forEach(s => { s.songs = s.songs.filter(x => x.song_id !== id); }); save(); },
     async services() { return clone(st.services); },
@@ -979,6 +990,7 @@ const SupaDB = (cfg) => {
     },
     async sendCode(email) { await q(sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } })); },
     async signInPw(email, password) { const { error } = await sb.auth.signInWithPassword({ email, password }); if (error) throw new Error(/invalid/i.test(error.message) ? 'Correo o contraseña incorrectos. Si todavía no creaste tu contraseña, entra con código.' : error.message); },
+    async ia(body) { const { data, error } = await sb.functions.invoke('ia', { body }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } if (data && data.error) throw new Error(data.error); return data.text; },
     async drive(action, extra) { const { data, error } = await sb.functions.invoke('drive', { body: Object.assign({ action }, extra || {}) }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } if (data && data.error) throw new Error(data.error); return data; },
     async setPassword(password) { await q(sb.auth.updateUser({ password })); },
     async verify(email, token) { await q(sb.auth.verifyOtp({ email, token, type: 'email' })); },
@@ -1638,6 +1650,9 @@ function studioBind(s, w, ta, h) {
     const sel = $('#sK', w), k = keyOpt(sel, r.key); if (k && !sel.value) { sel.value = k; h.kc(); } if (r.bpm && !$('#sB', w).value) { $('#sB', w).value = r.bpm; h.tg(); }
     if (r.chart && putChart(r.chart, 'lo del archivo')) msg(`Importado desde ${r.from}. Revisa con la vista previa.`); };
 
+  // 5) revisar el cifrado con IA
+  $('#sAI', w).onclick = () => { const ch = ta.value.trim(); if (!ch) return toast('Primero pon la letra con acordes.');
+    AI.msgs = []; openAI(`Revisa este cifrado de «${$('#sT', w).value.trim() || 'la canción'}» en tono ${$('#sK', w).value || '?'}${s.analysis ? ` (el análisis del audio dio ${s.analysis.key}, ${s.analysis.bpm} BPM)` : ''}: dime qué acordes no cuadran con el tono, si los nombres de las secciones están bien y devuélvemelo corregido.\n\n${ch}`, { title: 'Revisar cifrado con IA', task: 'chord', apply: v => { ta.value = v; refresh(); } }); };
   // 4) buscar un cifrado en internet: se abre en otra pestaña y lo pegas
   $('#sGo', w).onclick = () => { const t = $('#sT', w).value.trim(); if (!t) { $('#sT', w).focus(); return toast('Escribe primero el nombre de la canción.'); }
     window.open(searchChordsUrl(t, $('#sA', w).value.trim()), '_blank', 'noopener'); msg('Cuando encuentres el cifrado, cópialo completo y toca «Pegar cifrado».'); };
@@ -1649,6 +1664,35 @@ function openExport(s) {
     <button class="row click" data-x="txt"><span class="tx"><b>Texto (acordes arriba)</b><small>Para WhatsApp o cualquier editor</small></span></button>
     <button class="row click" data-x="cho"><span class="tx"><b>ChordPro (.cho)</b><small>Lo abren OnSong, SongbookPro, Planning Center y otras apps</small></span></button></div>`, (w, close) => {
     $$('[data-x]', w).forEach(b => b.onclick = () => { close(); exportSong(s, b.dataset.x); });
+  });
+}
+
+/* ---------- asistente con IA (Gemini, por la función «ia» de Supabase) ---------- */
+const aiBtn = () => `<button class="ib" data-ai aria-label="Asistente" title="Asistente con IA">${ic('spark')}</button>`;
+function aiContext() {
+  const songs = (ST.songs || []).map(s => `- ${s.title}${s.artist ? ' · ' + s.artist : ''} · tono ${s.key || '?'} · ${s.bpm || '?'} BPM${(s.tags || []).length ? ' · ' + s.tags.join(', ') : ''}${/\[[A-G]/.test(s.chart || '') ? ' · con cifrado' : ''}`).join('\n');
+  const svcs = (typeof upcoming === 'function' ? upcoming() : []).slice(0, 6).map(sv => `- ${sv.name || 'Servicio'} ${sv.date}: ${(sv.songs || []).map(x => { const so = song(x.song_id); return so ? so.title + (x.key ? ' (' + x.key + ')' : '') : ''; }).filter(Boolean).join(', ') || 'sin canciones aún'}`).join('\n');
+  return `Hoy: ${new Date().toISOString().slice(0, 10)}\nQuien pregunta: ${(me() || {}).name || ''}\nCanciones de la biblioteca:\n${songs}\n\nPróximos servicios:\n${svcs}`;
+}
+const AI = { msgs: [] };
+function aiMd(t) { return esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^\s*[-*] (.*)$/gm, '• $1').replace(/\n/g, '<br>'); }
+function openAI(seed, opts) {
+  opts = opts || {};
+  modal(`${ph(opts.title || 'Asistente')}<div class="aich" id="aiL"></div>
+    ${AI.msgs.length || seed ? '' : `<div class="aisug">${['Arma un repertorio de 5 canciones para el domingo, empezando rápido y terminando en adoración', '¿Qué canciones lentas en G tenemos?', 'Dame 5 versículos sobre la fe para la pantalla', 'Explícame qué es un acorde sus4'].map(t => `<button class="chip" data-q="${esc(t)}">${esc(t)}</button>`).join('')}</div>`}
+    <div class="aiin"><textarea class="in" id="aiT" rows="2" placeholder="Pregúntale lo que quieras…"></textarea><button class="btn primary" id="aiGo">Enviar</button></div>
+    <p class="hint" style="margin:6px 0 0">Responde Gemini con los datos de tus canciones y servicios. Revisa lo que proponga antes de usarlo.</p>`, (w) => {
+    const L = $('#aiL', w), T = $('#aiT', w);
+    const draw = (busy) => { L.innerHTML = AI.msgs.map((m, i) => `<div class="aim ${m.role}">${m.role === 'user' ? esc(m.text).replace(/\n/g, '<br>') : aiMd(m.text)}${m.role !== 'user' && opts.apply && i === AI.msgs.length - 1 && /\[[A-G]/.test(m.text) ? '<div><button class="btn small" data-apply>Usar este cifrado</button></div>' : ''}</div>`).join('') + (busy ? '<div class="aim model"><span class="spin"></span>Pensando…</div>' : ''); L.scrollTop = L.scrollHeight;
+      const ap = $('[data-apply]', L); if (ap) ap.onclick = () => { const t = AI.msgs[AI.msgs.length - 1].text; const m = /(\[(?:Intro|Verso|Coro|Pre-coro|Puente|Instrumental|Final)[^\]]*\][\s\S]*)/i.exec(t); opts.apply((m ? m[1] : t).replace(/```[a-z]*\n?|```/g, '').trim()); toast('Listo, cambié el cifrado en el editor. Revísalo antes de guardar.'); }; };
+    const send = async (q) => { q = (q || T.value).trim(); if (!q) return; T.value = ''; const sug = $('.aisug', w); if (sug) sug.remove();
+      AI.msgs.push({ role: 'user', text: q }); draw(true); $('#aiGo', w).disabled = true;
+      try { const text = await DB.ia({ messages: AI.msgs, context: (opts.context || '') + '\n\n' + aiContext(), task: opts.task || 'chat' }); AI.msgs.push({ role: 'model', text }); }
+      catch (e) { AI.msgs.push({ role: 'model', text: '⚠️ ' + (e.message || e) }); }
+      $('#aiGo', w).disabled = false; draw(); };
+    $('#aiGo', w).onclick = () => send(); T.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+    $$('[data-q]', w).forEach(b => b.onclick = () => send(b.dataset.q));
+    draw(); if (seed) send(seed); else setTimeout(() => T.focus(), 50);
   });
 }
 
@@ -1665,7 +1709,7 @@ const I = {
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   pin: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
   yt: '<rect x="2.5" y="5" width="19" height="14" rx="4"/><path d="m10 9 5 3-5 3z" fill="currentColor"/>', sp: '<circle cx="12" cy="12" r="9.5"/><path d="M7 9.5c3.6-1 7.3-.7 10.3.9M7.6 12.6c3-.8 6-.5 8.6.8M8.3 15.5c2.4-.6 4.7-.4 6.8.6"/>',
-  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', audio: '<path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10M21 12h0"/>', dl: '<path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/>', up: '<path d="m6 15 6-6 6 6"/>', down: '<path d="m6 9 6 6 6-6"/>', back: '<path d="M15 5 8 12l7 7"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', spark: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>', audio: '<path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10M21 12h0"/>', dl: '<path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/>', up: '<path d="m6 15 6-6 6 6"/>', down: '<path d="m6 9 6 6 6-6"/>', back: '<path d="M15 5 8 12l7 7"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>', gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   mix: '<path d="M5 3v18M12 3v18M19 3v18"/><rect x="3" y="13" width="4" height="4" rx="1" fill="currentColor"/><rect x="10" y="6" width="4" height="4" rx="1" fill="currentColor"/><rect x="17" y="10" width="4" height="4" rx="1" fill="currentColor"/>',
   wifi: '<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.6 16a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19.3" r="1.1" fill="currentColor" stroke="none"/>',
@@ -1765,13 +1809,13 @@ const tabGo = k => k === 'stage' ? (ST.stage || 'live') : k;
 function go(tab, view) { if (tab === 'live' || tab === 'mix') ST.stage = tab; ST.tab = tab; ST.view = view || null; if (tab !== 'live') stopLive(); if (tab !== 'mix') mixStop(); else setTimeout(mixStart, 0); try { history.replaceState(null, '', '#' + tab); } catch (e) {} render(); window.scrollTo(0, 0); }
 function shell() {
   const pend = upcoming().some(s => myAssign(s).some(t => t.status === 'pending'));
-  return `<div class="app"><nav class="rail" aria-label="Secciones"><div class="brand">${logo()}<div><b>RF App</b><small>Rompiendo Fortalezas</small></div><span style="flex:1"></span>${bellBtn()}${themeBtn()}</div>
+  return `<div class="app"><nav class="rail" aria-label="Secciones"><div class="brand">${logo()}<div><b>RF App</b><small>Rompiendo Fortalezas</small></div><span style="flex:1"></span>${aiBtn()}${bellBtn()}${themeBtn()}</div>
     ${TABS.map(([k, l, i]) => `<button class="navb${tabOn(k) ? ' on' : ''}" data-tab="${tabGo(k)}">${ic(i)}${l}${k === 'home' && pend ? '<span class="pill warn">1</span>' : ''}</button>`).join('')}
     <span class="sp"></span><button class="navb${ST.tab === 'me' ? ' on' : ''}" data-tab="me">${avt(me(), 'sm')}Mi perfil</button></nav>
     <main class="main" id="main"></main>
     <nav class="tabbar" aria-label="Secciones">${TABS.map(([k, l, i]) => `<button class="${tabOn(k) ? 'on' : ''}" data-tab="${tabGo(k)}" aria-label="${l}">${ic(i)}<span>${l}</span>${k === 'home' && pend ? '<i class="dot"></i>' : ''}</button>`).join('')}</nav></div>`;
 }
-const mhead = () => `<header class="mhead">${logo()}<b>RF App</b><span class="sp"></span>${bellBtn()}${themeBtn()}<button class="mav${ST.tab === 'me' ? ' on' : ''}" data-tab="me" aria-label="Mi perfil">${avt(me(), 'sm')}</button></header>`;
+const mhead = () => `<header class="mhead">${logo()}<b>RF App</b><span class="sp"></span>${aiBtn()}${bellBtn()}${themeBtn()}<button class="mav${ST.tab === 'me' ? ' on' : ''}" data-tab="me" aria-label="Mi perfil">${avt(me(), 'sm')}</button></header>`;
 /* atrás del teléfono: abrir una canción, un servicio o un perfil deja un paso en el historial;
    el gesto de deslizar (iPhone) o el botón atrás (Android) lo cierra en vez de salirse de la app */
 const NAV = { open: false };
@@ -1809,6 +1853,7 @@ function render() {
   $$('[data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
   $$('[data-themetg]').forEach(b => b.onclick = () => setTheme(effTheme() === 'dark' ? 'light' : 'dark'));
   $$('[data-bell]').forEach(b => b.onclick = openNotices);
+  $$('[data-ai]').forEach(b => b.onclick = () => openAI());
   bind(m); if (ST.tab === 'mix' && !ST.view) mixBind(); if (ST.tab === 'me') bindDrive();
 }
 const demoBar = () => DB.mode !== 'demo' ? '' : `<div class="demo">${ic('bell')}<span><b>Modo demostración.</b> Datos de ejemplo guardados solo en este navegador. Ver como:</span>
@@ -2259,7 +2304,7 @@ function editSong(id, after) {
           <div class="etr"><span class="etl">Acorde</span><div class="cbar" id="sCk" aria-label="Acordes del tono"></div></div>
         </div>
         <div class="ebody"><textarea class="in chartin" id="sC" spellcheck="false" placeholder="Toca una sección para empezar y escribe la letra. Para un acorde, pon el cursor justo antes de la sílaba y toca el acorde.&#10;&#10;[Verso 1]&#10;[G]Cuando sale el [D]sol…">${esc(s.chart || '')}</textarea><div class="cprev" id="sPrev" hidden></div></div>
-        <div class="efoot"><button type="button" class="btn small primary" id="sAud">${ic('audio')}Sacar acordes del audio</button><input type="file" id="sAudF" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado</button><button type="button" class="btn small ghost" id="sImp">Importar archivo</button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,text/plain" hidden><button type="button" class="btn small ghost" id="sGo">Buscar cifrado en internet</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
+        <div class="efoot"><button type="button" class="btn small primary" id="sAud">${ic('audio')}Sacar acordes del audio</button><input type="file" id="sAudF" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado</button><button type="button" class="btn small ghost" id="sImp">Importar archivo</button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,text/plain" hidden><button type="button" class="btn small ghost" id="sGo">Buscar cifrado en internet</button><button type="button" class="btn small ghost" id="sAI">${ic('spark')}Revisar con IA</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
       </div></div></div>
     <div class="links">${id && isDir() ? `<button class="btn ghost danger" data-del>${ic('trash')}Eliminar</button>` : ''}<span style="flex:1"></span><button class="btn primary" id="sSave">Guardar</button></div>`, (w, close) => {
     const ta = $('#sC', w);
