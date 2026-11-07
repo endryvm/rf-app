@@ -1843,7 +1843,8 @@ const aiBtn = () => `<button class="ib" data-ai aria-label="Asistente" title="As
 function aiContext() {
   const songs = (ST.songs || []).map(s => `- [id ${s.id}] ${s.title}${s.artist ? ' · ' + s.artist : ''} · tono ${s.key || '?'} · ${s.bpm || '?'} BPM${(s.tags || []).length ? ' · ' + s.tags.join(', ') : ''}${/\[[A-G]/.test(s.chart || '') ? ' · con cifrado' : ''}`).join('\n');
   const svcs = (typeof upcoming === 'function' ? upcoming() : []).slice(0, 6).map(sv => `- [id ${sv.id}] ${sv.name || 'Servicio'} ${sv.date}${canChoose(sv) ? '' : ' (sin permiso para cambiar su repertorio)'}: ${(sv.songs || []).map(x => { const so = song(x.song_id); return so ? so.title + (x.key ? ' (' + x.key + ')' : '') : ''; }).filter(Boolean).join(', ') || 'sin canciones aún'}`).join('\n');
-  return `Hoy: ${new Date().toISOString().slice(0, 10)}\nQuien pregunta: ${(me() || {}).name || ''}\nCanciones de la biblioteca:\n${songs}\n\nPróximos servicios:\n${svcs}`;
+  const team = (ST.members || []).map(m => `- [id ${m.id}] ${m.name}${m.role ? ' · ' + m.role : ''}`).join('\n');
+  return `Hoy: ${new Date().toISOString().slice(0, 10)}\nQuien pregunta: ${(me() || {}).name || ''}\nEquipo (para «lead_id», quien dirige o canta la canción):\n${team}\n\nCanciones de la biblioteca:\n${songs}\n\nPróximos servicios:\n${svcs}\n\nAl agregar canciones puedes poner lead_id (id del equipo) en cada canción para asignar quién la dirige.`;
 }
 const AI = { msgs: [] };
 function aiMd(t) { return esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^\s*[-*] (.*)$/gm, '• $1').replace(/\n/g, '<br>'); }
@@ -1856,9 +1857,9 @@ function openAI(seed, opts) {
     const L = $('#aiL', w), T = $('#aiT', w);
     const draw = (busy) => { L.innerHTML = AI.msgs.map((m, i) => { if (m.role === 'user') return `<div class="aim user">${esc(m.text).replace(/\n/g, '<br>')}</div>`;
         const { text, actions } = aiSplit(m.text), last = i === AI.msgs.length - 1;
-        return `<div class="aim model">${aiMd(text)}${actions.length ? `<div class="aiact">${actions.map(a => `<div>• ${esc(aiDescribe(a))}</div>`).join('')}${m.done ? '<div class="aidone">✓ Hecho</div>' : `<button class="btn small primary" data-aiact="${i}">Aplicar en la app</button>`}</div>` : ''}${opts.apply && last && /\[[A-G]/.test(text) ? '<div><button class="btn small" data-apply>Usar este cifrado</button></div>' : ''}</div>`; }).join('') + (busy ? '<div class="aim model"><span class="spin"></span>Pensando…</div>' : ''); L.scrollTop = L.scrollHeight;
-      $$('[data-aiact]', L).forEach(b => b.onclick = async () => { const m = AI.msgs[+b.dataset.aiact]; b.disabled = true; b.textContent = 'Aplicando…';
-        try { await aiRun(aiSplit(m.text).actions); m.done = true; toast('Listo, ya está en la app.'); } catch (e) { toast(e.message || 'No se pudo aplicar', 5000); } draw(); });
+        return `<div class="aim model">${aiMd(text)}${actions.length ? `<div class="aiact">${actions.map(a => `<div>• ${esc(aiDescribe(a))}</div>`).join('')}${m.done ? `<div class="aidone">✓ Hecho${(m.notes || []).length ? '<br><small>Completé ' + m.notes.map(esc).join(' · ') + '</small>' : ''}</div>` : `<button class="btn small primary" data-aiact="${i}">Aplicar en la app</button>`}</div>` : ''}${opts.apply && last && /\[[A-G]/.test(text) ? '<div><button class="btn small" data-apply>Usar este cifrado</button></div>' : ''}</div>`; }).join('') + (busy ? '<div class="aim model"><span class="spin"></span>Pensando…</div>' : ''); L.scrollTop = L.scrollHeight;
+      $$('[data-aiact]', L).forEach(b => b.onclick = async () => { const m = AI.msgs[+b.dataset.aiact]; b.disabled = true; b.textContent = 'Aplicando y completando datos…';
+        try { const notes = await aiRun(aiSplit(m.text).actions); m.done = true; m.notes = notes; toast('Listo, ya está en la app.'); } catch (e) { toast(e.message || 'No se pudo aplicar', 5000); } draw(); });
       const ap = $('[data-apply]', L); if (ap) ap.onclick = () => { const t = aiSplit(AI.msgs[AI.msgs.length - 1].text).text; const m = /(\[(?:Intro|Verso|Coro|Pre-coro|Puente|Instrumental|Final)[^\]]*\][\s\S]*)/i.exec(t); opts.apply((m ? m[1] : t).replace(/```[a-z]*\n?|```/g, '').trim()); toast('Listo, cambié el cifrado en el editor. Revísalo antes de guardar.'); }; };
     const send = async (q) => { q = (q || T.value).trim(); if (!q) return; T.value = ''; const sug = $('.aisug', w); if (sug) sug.remove();
       AI.msgs.push({ role: 'user', text: q }); draw(true); $('#aiGo', w).disabled = true;
@@ -1889,23 +1890,29 @@ function aiSplit(txt) {
 const aiSvcName = id => { const sv = ST.services.find(x => x.id === id); return sv ? `${sv.name || 'Servicio'} (${cap(dShort.format(pD(sv.date)))})` : 'el servicio'; };
 const aiSongName = id => { const s = song(id); return s ? s.title : 'una canción'; };
 function aiDescribe(a) {
-  if (a.type === 'add_songs') return `Agregar a ${aiSvcName(a.service_id)}: ${(a.songs || []).map(x => aiSongName(x.song_id) + (x.key ? ' en ' + x.key : '')).join(', ')}`;
+  if (a.type === 'add_songs') return `Agregar a ${aiSvcName(a.service_id)}: ${(a.songs || []).map(x => aiSongName(x.song_id) + (x.key ? ' en ' + x.key : '') + (x.lead_id && mem(x.lead_id) ? ' · la dirige ' + mem(x.lead_id).name : '')).join(', ')}`;
   if (a.type === 'set_key') return `${aiSongName(a.song_id)} en ${a.key} para ${aiSvcName(a.service_id)}`;
   if (a.type === 'remove_song') return `Quitar ${aiSongName(a.song_id)} de ${aiSvcName(a.service_id)}`;
-  if (a.type === 'create_song') return `Crear la canción «${a.title}»${a.artist ? ' de ' + a.artist : ''}${a.key ? ' en ' + a.key : ''}${a.add_to_service ? ' y agregarla a ' + aiSvcName(a.add_to_service) : ''}`;
+  if (a.type === 'create_song') return `Crear la canción «${a.title}»${a.artist ? ' de ' + a.artist : ''}${a.key ? ' en ' + a.key : ''}${a.add_to_service ? ' y agregarla a ' + aiSvcName(a.add_to_service) : ''}${a.lead_id && mem(a.lead_id) ? ' · la dirige ' + mem(a.lead_id).name : ''} (con datos, portada, letra y enlaces)`;
   return a.type;
 }
 async function aiRun(actions) {
-  const lists = {}; const L = id => { const sv = ST.services.find(x => x.id === id); if (!sv) throw new Error('No encontré ese servicio.'); if (!canChoose(sv)) throw new Error('No tienes permiso para cambiar el repertorio de ' + aiSvcName(id) + '.'); return lists[id] = lists[id] || sv.songs.map(x => Object.assign({}, x)); };
-  const add = (sid, id, key) => { const l = L(sid); if (!song(id) && !ST.songs.find(s => s.id === id)) return; const cur = l.find(x => x.song_id === id); if (cur) { if (key) cur.key = key; } else l.push({ song_id: id, key: key || (song(id) || {}).key || '', lead_id: '', notes: '' }); };
+  const lists = {}, toEnrich = new Set(); const L = id => { const sv = ST.services.find(x => x.id === id); if (!sv) throw new Error('No encontré ese servicio.'); if (!canChoose(sv)) throw new Error('No tienes permiso para cambiar el repertorio de ' + aiSvcName(id) + '.'); return lists[id] = lists[id] || sv.songs.map(x => Object.assign({}, x)); };
+  const add = (sid, id, key, lead) => { const l = L(sid); if (!ST.songs.find(s => s.id === id)) return; const cur = l.find(x => x.song_id === id); const ld = lead && mem(lead) ? lead : '';
+    if (cur) { if (key) cur.key = key; if (ld) cur.lead_id = ld; } else l.push({ song_id: id, key: key || (song(id) || {}).key || '', lead_id: ld, notes: '' }); toEnrich.add(id); };
   for (const a of actions) {
-    if (a.type === 'create_song') { const s = await DB.saveSong({ title: String(a.title || '').trim(), artist: a.artist || '', key: a.key || '', chart: '', tags: [] }); if (s && s.id) { ST.songs.push(s); if (a.add_to_service) add(a.add_to_service, s.id, a.key); } }
-    else if (a.type === 'add_songs') (a.songs || []).forEach(x => add(a.service_id, x.song_id, x.key));
+    if (a.type === 'create_song') { const s = await DB.saveSong({ title: String(a.title || '').trim(), artist: a.artist || '', key: a.key || '', chart: '', tags: [] }); if (s && s.id) { ST.songs.push(s); toEnrich.add(s.id); if (a.add_to_service) add(a.add_to_service, s.id, a.key, a.lead_id); } }
+    else if (a.type === 'add_songs') (a.songs || []).forEach(x => add(a.service_id, x.song_id, x.key, x.lead_id));
     else if (a.type === 'set_key') { const l = L(a.service_id), cur = l.find(x => x.song_id === a.song_id); if (cur) cur.key = a.key; else add(a.service_id, a.song_id, a.key); }
+    else if (a.type === 'set_lead') { const l = L(a.service_id), cur = l.find(x => x.song_id === a.song_id); if (cur && mem(a.lead_id)) cur.lead_id = a.lead_id; }
     else if (a.type === 'remove_song') lists[a.service_id] = L(a.service_id).filter(x => x.song_id !== a.song_id);
   }
   for (const [sid, l] of Object.entries(lists)) await DB.setServiceSongs(sid, l.map((x, i) => Object.assign(x, { position: i })));
+  // completar lo que le falte a cada canción: datos y portada, letra, enlaces de YouTube y Spotify
+  const notes = [];
+  for (const id of toEnrich) { const so = ST.songs.find(x => x.id === id); if (!so) continue; try { const n = await enrichSong(so); if (n.length) notes.push(`«${so.title}»: ${n.join(', ')}`); } catch (e) {} }
   await reload();
+  return notes;
 }
 
 /* ---------- escuchar el repertorio del servicio sin salir de la app ---------- */
@@ -2134,6 +2141,21 @@ function openChordBuilder(chart, key, done) {
     $('#cbOk', w).onclick = () => { done(lines.join('\n')); close(); };
     draw();
   }, 'xl');
+}
+
+/* completa una canción sin pisar nada que ya tenga: datos y portada (Apple Music), letra (LRCLIB), enlaces (YouTube, Spotify) */
+async function enrichSong(so) {
+  const got = [], q = (so.title + ' ' + (so.artist || '')).trim(), nt = normT(so.title);
+  let r = null;
+  if (!so.meta || !so.meta.cover) { const list = await itunesSearch(q).catch(() => []); r = list.find(x => normT(x.title) === nt) || list.find(x => normT(x.title).includes(nt)) || null;
+    if (r) { so.meta = Object.assign({}, so.meta, { title: r.title, artist: r.artist, album: r.album, year: r.year, dur: r.dur, cover: r.cover, src: r.src, url: r.url }); if (!so.artist) so.artist = r.artist; got.push('datos y portada'); } }
+  const needLyrics = !String(so.chart || '').replace(/^\s*\[[^\]]+\]\s*$/gm, '').trim();
+  const [Ly, k] = await Promise.all([needLyrics ? findLyrics(so.title, so.artist || '', (so.meta && so.meta.dur) || 0).catch(() => null) : null, (!so.youtube || !so.spotify) ? DB.links({ title: so.title, artist: so.artist || '' }).catch(() => ({})) : {}]);
+  if (Ly && (Ly.plain || Ly.synced)) { so.chart = lyricsToChart(Ly.plain || Ly.synced.map(x => x.text).join('\n')); so.meta = Object.assign({}, so.meta, { lyrics: Ly.synced ? 'synced' : 'plain', synced: Ly.synced || null }); got.push('letra'); }
+  if (k && k.youtube && !so.youtube) { so.youtube = k.youtube; got.push('YouTube'); }
+  if (k && k.spotify && !so.spotify) { so.spotify = k.spotify; got.push('Spotify'); }
+  if (got.length) await DB.saveSong(Object.assign({}, so));
+  return got;
 }
 
 /* ================= RF App: la app ================= */
