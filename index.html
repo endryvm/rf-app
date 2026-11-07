@@ -912,6 +912,9 @@ function keyChords(key) {
                : [n(0), n(2) + 'm', n(4) + 'm', n(5), n(7), n(9) + 'm', n(7) + '/' + n(11), n(0) + '/' + n(4), n(5) + '/' + n(9)];
 }
 
+// ¿el texto tiene acordes de verdad? ([Coro] o [Final] no cuentan, aunque empiecen con C o F)
+const hasChords = t => (String(t || '').match(/\[([^\]]+)\]/g) || []).some(m => isChord(m.slice(1, -1).trim()));
+
 /* ================= datos: la misma interfaz para la demostración (en este navegador) y para Supabase (la base de todos) ================= */
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
 const isoD = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -1860,7 +1863,7 @@ function openExport(s) {
 /* ---------- asistente con IA (Gemini, por la función «ia» de Supabase) ---------- */
 const aiBtn = () => `<button class="ib" data-ai aria-label="Asistente" title="Asistente con IA">${ic('spark')}</button>`;
 function aiContext() {
-  const songs = (ST.songs || []).map(s => `- [id ${s.id}] ${s.title}${s.artist ? ' · ' + s.artist : ''} · tono ${s.key || '?'} · ${s.bpm || '?'} BPM${(s.tags || []).length ? ' · ' + s.tags.join(', ') : ''}${/\[[A-G]/.test(s.chart || '') ? ' · con cifrado' : ''}`).join('\n');
+  const songs = (ST.songs || []).map(s => `- [id ${s.id}] ${s.title}${s.artist ? ' · ' + s.artist : ''} · tono ${s.key || '?'} · ${s.bpm || '?'} BPM${(s.tags || []).length ? ' · ' + s.tags.join(', ') : ''}${hasChords(s.chart || '') ? ' · con cifrado' : ''}`).join('\n');
   const svcs = (typeof upcoming === 'function' ? upcoming() : []).slice(0, 6).map(sv => `- [id ${sv.id}] ${sv.name || 'Servicio'} ${sv.date}${canChoose(sv) ? '' : ' (sin permiso para cambiar su repertorio)'}: ${(sv.songs || []).map(x => { const so = song(x.song_id); return so ? so.title + (x.key ? ' (' + x.key + ')' : '') : ''; }).filter(Boolean).join(', ') || 'sin canciones aún'}`).join('\n');
   const team = (ST.members || []).map(m => `- [id ${m.id}] ${m.name}${m.role ? ' · ' + m.role : ''}`).join('\n');
   return `Hoy: ${new Date().toISOString().slice(0, 10)}\nQuien pregunta: ${(me() || {}).name || ''}\nEquipo (para «lead_id», quien dirige o canta la canción):\n${team}\n\nCanciones de la biblioteca:\n${songs}\n\nPróximos servicios:\n${svcs}\n\nAl agregar canciones puedes poner lead_id (id del equipo) en cada canción para asignar quién la dirige.`;
@@ -1876,7 +1879,7 @@ function openAI(seed, opts) {
     const L = $('#aiL', w), T = $('#aiT', w);
     const draw = (busy) => { L.innerHTML = AI.msgs.map((m, i) => { if (m.role === 'user') return `<div class="aim user">${esc(m.text).replace(/\n/g, '<br>')}</div>`;
         const { text, actions } = aiSplit(m.text), last = i === AI.msgs.length - 1;
-        return `<div class="aim model">${aiMd(text)}${actions.length ? `<div class="aiact">${actions.map(a => `<div>• ${esc(aiDescribe(a))}</div>`).join('')}${m.done ? `<div class="aidone">✓ Hecho${(m.notes || []).length ? '<br><small>Completé ' + m.notes.map(esc).join(' · ') + '</small>' : ''}</div>` : `<button class="btn small primary" data-aiact="${i}">Aplicar en la app</button>`}</div>` : ''}${opts.apply && last && /\[[A-G]/.test(text) ? '<div><button class="btn small" data-apply>Usar este cifrado</button></div>' : ''}</div>`; }).join('') + (busy ? '<div class="aim model"><span class="spin"></span>Pensando…</div>' : ''); L.scrollTop = L.scrollHeight;
+        return `<div class="aim model">${aiMd(text)}${actions.length ? `<div class="aiact">${actions.map(a => `<div>• ${esc(aiDescribe(a))}</div>`).join('')}${m.done ? `<div class="aidone">✓ Hecho${(m.notes || []).length ? '<br><small>Completé ' + m.notes.map(esc).join(' · ') + '</small>' : ''}</div>` : `<button class="btn small primary" data-aiact="${i}">Aplicar en la app</button>`}</div>` : ''}${opts.apply && last && hasChords(text) ? '<div><button class="btn small" data-apply>Usar este cifrado</button></div>' : ''}</div>`; }).join('') + (busy ? '<div class="aim model"><span class="spin"></span>Pensando…</div>' : ''); L.scrollTop = L.scrollHeight;
       $$('[data-aiact]', L).forEach(b => b.onclick = async () => { const m = AI.msgs[+b.dataset.aiact]; b.disabled = true; b.textContent = 'Aplicando y completando datos…';
         try { const notes = await aiRun(aiSplit(m.text).actions); m.done = true; m.notes = notes; toast('Listo, ya está en la app.'); } catch (e) { toast(e.message || 'No se pudo aplicar', 5000); } draw(); });
       const ap = $('[data-apply]', L); if (ap) ap.onclick = () => { const t = aiSplit(AI.msgs[AI.msgs.length - 1].text).text; const m = /(\[(?:Intro|Verso|Coro|Pre-coro|Puente|Instrumental|Final)[^\]]*\][\s\S]*)/i.exec(t); opts.apply((m ? m[1] : t).replace(/```[a-z]*\n?|```/g, '').trim()); toast('Listo, cambié el cifrado en el editor. Revísalo antes de guardar.'); }; };
@@ -2066,7 +2069,7 @@ function alignChordsToLyrics(importedChart, lyricsChart, opts = {}) {
 async function chordSearch(title, artist, selfId) {
   const nt = normT(title), res = { lib: [], pco: null };
   // 1) Biblioteca de la iglesia (RF App): otras canciones o versiones con el mismo nombre que ya tienen acordes
-  res.lib = (ST.songs || []).filter(x => x.id !== selfId && /\[[A-G][^\]]*\]/.test(x.chart || '') && (normT(x.title) === nt || normT(x.title).includes(nt) || nt.includes(normT(x.title))))
+  res.lib = (ST.songs || []).filter(x => x.id !== selfId && hasChords(x.chart || '') && (normT(x.title) === nt || normT(x.title).includes(nt) || nt.includes(normT(x.title))))
     .map(x => ({ src: 'Biblioteca RF', title: x.title, artist: x.artist || '', key: x.key || '', get: async () => ({ chart: x.chart, key: x.key }) }));
   // 2) Planning Center Services (donde llegan los cifrados de SongSelect): solo si la iglesia lo conectó
   try { const r = await DB.chordSrc({ task: 'pco_search', title, artist }); res.pco = r; } catch (e) { res.pco = { error: e.message }; }
@@ -2092,7 +2095,7 @@ function openChordImport(o) {
       <div class="list"><button type="button" class="row click" data-ciaudio><span class="tx"><b>Sacar acordes de una grabación</b><small>MP3, WAV o M4A de esta versión: propone los acordes y tú corriges</small></span><span class="pill">Propuesta</span></button></div>`;
     const go = async (kind, i) => { const r = kind === 'lib' ? R.lib[i] : pcoRows[i]; L.style.opacity = .5;
       try { let got; if (kind === 'lib') got = await r.get(); else { const d = await DB.chordSrc({ task: 'pco_get', song_id: r.song_id, arrangement_id: r.id }); if (d.error) throw new Error(d.error); got = { chart: importSongFile('pco.txt', d.chord_chart || '').chart, key: d.key }; }
-        if (!got.chart || !/\[[A-G]/.test(got.chart)) throw new Error('Esa versión no trae acordes.');
+        if (!got.chart || !hasChords(got.chart)) throw new Error('Esa versión no trae acordes.');
         close(); o.apply(got.chart, got.key, r.src + (r.name ? ' · ' + r.name : '')); }
       catch (e) { L.style.opacity = 1; toast(e.message || 'No se pudo importar', 5000); } };
     $$('[data-ci]', w).forEach(b => b.onclick = () => { const [k, i] = b.dataset.ci.split(':'); go(k, +i); });
@@ -2560,18 +2563,18 @@ const tagPills = s => songTags(s).slice(0, 3).map(t => `<span class="tg${TAG_TEM
 const tagBar = (sel, attr) => `<div class="cbar tagbar" aria-label="Filtrar por etiqueta">${allTags().map(t => `<button type="button" class="chip tagc${sel.includes(t) ? ' on' : ''}" ${attr}="${esc(t)}">${esc(t)}</button>`).join('')}${sel.length ? `<button type="button" class="chip" ${attr}="">Quitar filtros</button>` : ''}</div>`;
 function viewSongs() {
   const q = ST.songFilter.trim().toLowerCase();
-  const list = ST.songs.filter(s => !q || (s.title + ' ' + (s.artist || '')).toLowerCase().includes(q)).filter(s => ST.songSeg === 'all' || (ST.songSeg === 'nopb' ? !s.from_playback : ST.songSeg === 'chart' ? /\[[A-G]/.test(s.chart || '') : !/\[[A-G]/.test(s.chart || ''))).filter(s => tagMatch(s, ST.songTagF)).sort((a, b) => a.title.localeCompare(b.title, 'es'));
+  const list = ST.songs.filter(s => !q || (s.title + ' ' + (s.artist || '')).toLowerCase().includes(q)).filter(s => ST.songSeg === 'all' || (ST.songSeg === 'nopb' ? !s.from_playback : ST.songSeg === 'chart' ? hasChords(s.chart || '') : !hasChords(s.chart || ''))).filter(s => tagMatch(s, ST.songTagF)).sort((a, b) => a.title.localeCompare(b.title, 'es'));
   return `<div class="wrap">${demoBar()}${topBar('Canciones', `${ST.songs.length} en la base de datos`, `<button class="btn primary" data-act="newsong">${ic('plus')}Canción</button>`)}
     <div class="top" style="gap:10px"><label class="search">${ic('search')}<input id="songQ" placeholder="Buscar por nombre o artista" value="${esc(ST.songFilter)}" autocomplete="off"></label>
       <div class="seg"><button class="${ST.songSeg === 'all' ? 'on' : ''}" data-seg="all">Todas</button><button class="${ST.songSeg === 'chart' ? 'on' : ''}" data-seg="chart">Con cifrado</button><button class="${ST.songSeg === 'nochart' ? 'on' : ''}" data-seg="nochart">Sin cifrado</button><button class="${ST.songSeg === 'nopb' ? 'on' : ''}" data-seg="nopb">Sin playback</button></div></div>
     ${tagBar(ST.songTagF, 'data-tagf')}
-    <div class="card list">${list.length ? list.map(s => { const lu = lastUsed(s.id); const hasC = /\[[A-G]/.test(s.chart || '');
+    <div class="card list">${list.length ? list.map(s => { const lu = lastUsed(s.id); const hasC = hasChords(s.chart || '');
       return `<div class="row click" data-song="${s.id}"><span class="keyb">${esc(s.key || '—')}</span><div class="tx"><b>${esc(s.title)}</b><small>${esc(s.artist || '')}${s.bpm ? ' · ' + s.bpm + ' BPM' : ''}${lu ? ' · última vez ' + dShort.format(lu) : ''}</small><span class="tgs">${tagPills(s)}</span></div>${hasC ? '<span class="pill gold">Cifrado</span>' : s.chart ? '<span class="pill">Letra</span>' : ''}${s.from_playback ? '<span class="pill" title="Tiene secuencia en RF Playback">Playback</span>' : '<span class="pill warn">Falta el playback</span>'}</div>`; }).join('') : `<div class="empty">${ST.songTagF.length ? 'Ninguna canción tiene esas etiquetas juntas.' : 'No encontré canciones con ese nombre.'}</div>`}</div></div>`;
 }
 function viewSong(id) {
   const s = song(id); if (!s) return '<div class="wrap"><div class="empty">Esta canción ya no existe.</div></div>';
   const sh = ST.sheet; const baseKey = sh.key || s.key; const key = transKey(baseKey, sh.semi);
-  const hasC = /\[[A-G]/.test(s.chart || '');
+  const hasC = hasChords(s.chart || '');
   const mode = !hasC ? 'lyrics' : sh.mode || ((me().roles || []).some(r => !VOICE(r)) ? 'chords' : 'lyrics');
   const used = upcoming().filter(sv => sv.songs.some(x => x.song_id === id));
   return `<div class="wrap"><div class="sheet-top"><button class="ib" data-back="${ST.tab}" aria-label="Volver">${ic('back')}</button><div class="tx"><div class="eyebrow">${esc(s.artist || '')}</div><h1>${esc(s.title)}</h1>
@@ -2905,7 +2908,7 @@ function editSong(id, after) {
     if (matchMedia('(min-width:1000px)').matches) $('#sPrevT', w).click();
     // pegar un cifrado copiado de otra página (acordes arriba, letra abajo)
     $('#sPaste', w).onclick = async () => { let clip = ''; try { clip = navigator.clipboard && navigator.clipboard.readText ? await navigator.clipboard.readText() : ''; } catch (e) {}
-      if (clip && clip.trim().length > 30 && (looksChordsOver(clip) || /\[[A-G][^\]]*\]/.test(clip))) { let v = tidyPasted(clip);
+      if (clip && clip.trim().length > 30 && (looksChordsOver(clip) || hasChords(clip))) { let v = tidyPasted(clip);
         if (!ta.value.trim() || confirm('¿Cambio lo que hay en el editor por el cifrado que copiaste?')) { ta.value = v; ta.dispatchEvent(new Event('input')); $('#sCh', w).textContent = 'Pegué el cifrado que copiaste y lo acomodé. Revisa con la vista previa.'; if (pv.hidden) $('#sPrevT', w).click(); return; } }
       pasteModal(); };
     const pasteModal = () => modal(`${ph('Pegar cifrado')}
