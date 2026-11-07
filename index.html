@@ -2029,8 +2029,8 @@ function openChordImport(o) {
       <h4 class="cih">Se importan solos ${ic('check')}</h4>
       <div class="cisrc"><b>Biblioteca de la iglesia</b><small>Canciones de RF App que ya tienen acordes</small></div>
       <div class="list">${R.lib.length ? R.lib.map((r, i) => row(r, i, 'lib')).join('') : '<p class="hint">No hay otra versión con acordes en la biblioteca.</p>'}</div>
-      <div class="cisrc"><b>Planning Center · SongSelect</b><small>Arreglos con cifrado de la cuenta de la iglesia</small></div>
-      <div class="list">${pcoRows.map((r, i) => row(r, i, 'pco')).join('')}${pcoNote ? `<p class="hint">${pcoNote}</p>` : ''}</div>
+      ${R.pco && R.pco.configured === false ? '' : `<div class="cisrc"><b>Planning Center · SongSelect</b><small>Arreglos con cifrado de la cuenta de la iglesia</small></div>
+      <div class="list">${pcoRows.map((r, i) => row(r, i, 'pco')).join('')}${pcoNote ? `<p class="hint">${pcoNote}</p>` : ''}</div>`}
       <div class="cisrc"><b>Archivo descargado</b><small>SongSelect (ChordPro / .usr), Worship Together (ChordPro), OnSong u otro .cho / .txt</small></div>
       <div class="list"><button type="button" class="row click" data-cifile><span class="tx"><b>Escoger archivo</b><small>Se leen los acordes y se ponen sobre tu letra</small></span><span class="pill ok">Importa</span></button></div>
       <h4 class="cih">Solo se pueden ver</h4>
