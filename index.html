@@ -1660,9 +1660,13 @@ function lyricsToChart(plain) {
   const st = String(plain || '').replace(/\r/g, '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
   const lines = x => x.split('\n').map(normT).filter(Boolean);
   const sim = (a, b) => { const A = new Set(lines(a)), B = new Set(lines(b)); let n = 0; A.forEach(l => { if (B.has(l)) n++; }); return n / Math.max(1, Math.min(A.size, B.size)); };
-  const grp = []; st.forEach((x, i) => { let g = -1; for (let j = 0; j < i; j++) if (sim(x, st[j]) >= 0.5) { g = grp[j]; break; } grp.push(g >= 0 ? g : i); });
+  const grp = []; st.forEach((x, i) => { let g = -1; for (let j = 0; j < i; j++) if (sim(x, st[j]) >= 0.4) { g = grp[j]; break; } grp.push(g >= 0 ? g : i); });
   const cnt = {}; grp.forEach(g => cnt[g] = (cnt[g] || 0) + 1);
   const rep = Object.keys(cnt).filter(g => cnt[g] > 1).map(Number).sort((a, b) => cnt[b] - cnt[a] || a - b);
+  // si ningún párrafo se repite completo, el coro es el que tiene más líneas que también salen en otros párrafos
+  if (!rep.length) { const lc = {}; st.forEach(x => new Set(lines(x)).forEach(l => lc[l] = (lc[l] || 0) + 1));
+    let best = -1, bv = 0.5; st.forEach((x, i) => { const L = lines(x); const r = L.filter(l => lc[l] > 1).length / Math.max(1, L.length); if (r > bv) { bv = r; best = i; } });
+    if (best >= 0) { rep.push(grp[best]); cnt[grp[best]] = Math.max(2, cnt[grp[best]]); } }
   const label = {}; const coro = rep[0];
   if (coro != null) label[coro] = 'Coro';
   rep.slice(1).forEach(g => { const before = grp.every((x, i) => x !== g || grp[i + 1] === coro); label[g] = before ? 'Pre-coro' : (label[g] || ''); });
@@ -1779,6 +1783,8 @@ function studioBind(s, w, ta, h) {
       s.meta.lyrics = L.synced ? 'synced' : 'plain'; s.meta.synced = L.synced || null;
       const plain = L.plain || L.synced.map(x => x.text).join('\n').replace(/\n{2,}/g, '\n\n');
       if (putChart(lyricsToChart(plain), 'la letra encontrada')) msg(L.synced ? 'Letra lista. Ahora toca «Sacar acordes del audio» con el MP3 de esta misma versión y los acordes caen solos sobre la letra.' : 'Letra lista y separada en estrofas. Revisa los nombres de las secciones y añade los acordes (o sácalos del audio).');
+      // la IA pone los nombres de sección (solo los nombres; la letra no se toca). Si no responde, se queda lo que adivinó la app
+      aiSectionNames(ta.value).then(v => { if (v && ta.value.trim()) { ta.value = v; refresh(); msg('Letra lista con sus secciones (verso, coro, puente…). Revísalas y corrige si hace falta.'); } }).catch(() => {});
     } else { s.meta.lyrics = 'none'; msg('La letra no está en la base abierta. Pégala, impórtala o busca el cifrado en internet.'); }
     meta();
   });
@@ -2173,7 +2179,7 @@ async function enrichSong(so) {
     if (r) { so.meta = Object.assign({}, so.meta, { title: r.title, artist: r.artist, album: r.album, year: r.year, dur: r.dur, cover: r.cover, src: r.src, url: r.url }); if (!so.artist) so.artist = r.artist; got.push('datos y portada'); } }
   const needLyrics = !String(so.chart || '').replace(/^\s*\[[^\]]+\]\s*$/gm, '').trim();
   const [Ly, k] = await Promise.all([needLyrics ? findLyrics(so.title, so.artist || '', (so.meta && so.meta.dur) || 0).catch(() => null) : null, (!so.youtube || !so.spotify) ? DB.links({ title: so.title, artist: so.artist || '' }).catch(() => ({})) : {}]);
-  if (Ly && (Ly.plain || Ly.synced)) { so.chart = lyricsToChart(Ly.plain || Ly.synced.map(x => x.text).join('\n')); so.meta = Object.assign({}, so.meta, { lyrics: Ly.synced ? 'synced' : 'plain', synced: Ly.synced || null }); got.push('letra'); }
+  if (Ly && (Ly.plain || Ly.synced)) { so.chart = lyricsToChart(Ly.plain || Ly.synced.map(x => x.text).join('\n')); try { const v = await aiSectionNames(so.chart); if (v) so.chart = v; } catch (e) {} so.meta = Object.assign({}, so.meta, { lyrics: Ly.synced ? 'synced' : 'plain', synced: Ly.synced || null }); got.push('letra'); }
   if (k && k.youtube && !so.youtube) { so.youtube = k.youtube; got.push('YouTube'); }
   if (k && k.spotify && !so.spotify) { so.spotify = k.spotify; got.push('Spotify'); }
   if (got.length) await DB.saveSong(Object.assign({}, so));
