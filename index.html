@@ -1017,6 +1017,9 @@ const DemoDB = (() => {
     async deleteMember(id) { st.members = st.members.filter(m => m.id !== id); st.services.forEach(s => { s.team = s.team.filter(t => t.member_id !== id); }); save(); },
     async songs() { return clone(st.songs); },
     async links() { return {}; },
+    async calUrl() { return 'https://example.com/calendario-demo.ics'; },
+    async songPrivate(id) { return (st._priv || {})[id] || ''; },
+    async savePrivate(id, url) { st._priv = st._priv || {}; st._priv[id] = url; },
     async chordSrc(q) { return q.task === 'pco_search' ? { configured: false } : { error: 'No disponible en la demostración' }; },
     async ia() { await new Promise(r => setTimeout(r, 600)); return 'En el modo de demostración el asistente no está conectado. En la app real responde Gemini con los datos de tus canciones y servicios.'; },
     async saveSong(s) { s.updated_at = new Date().toISOString(); if (!s.id || !st.songs.find(x => x.id === s.id)) { s.id = s.id || uid(); st.songs.push(s); } else Object.assign(st.songs.find(x => x.id === s.id), s); save(); return s; },
@@ -1064,6 +1067,9 @@ const SupaDB = (cfg) => {
     },
     async sendCode(email) { await q(sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } })); },
     async signInPw(email, password) { const { error } = await sb.auth.signInWithPassword({ email, password }); if (error) throw new Error(/invalid/i.test(error.message) ? 'Correo o contraseña incorrectos. Si todavía no creaste tu contraseña, entra con código.' : error.message); },
+    async calUrl() { const { data, error } = await sb.functions.invoke('calendario', { body: {} }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } return data.url; },
+    async songPrivate(id) { const { data, error } = await sb.from('song_private').select('drive_url').eq('song_id', id).maybeSingle(); if (error) return null; return data ? data.drive_url : ''; },
+    async savePrivate(id, url) { const { error } = await sb.from('song_private').upsert({ song_id: id, drive_url: url || '', updated_at: new Date().toISOString() }); if (error) throw error; },
     async chordSrc(q) { const { data, error } = await sb.functions.invoke('asistente', { body: q }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} throw new Error(m); } return data || {}; },
     async links(q) { try { const { data, error } = await sb.functions.invoke('asistente', { body: Object.assign({ task: 'links' }, q) }); if (error) { let m = error.message; try { const c = await error.context.json(); m = c.error || m; } catch (_) {} return { error: m }; } return data || {}; } catch (e) { return { error: e.message || String(e) }; } },
     async ia(body) { let { data, error } = await sb.functions.invoke('asistente', { body });
@@ -1813,6 +1819,8 @@ function studioBind(s, w, ta, h) {
   $('#sAI', w).onclick = () => { const ch = ta.value.trim(); if (!ch) return toast('Primero pon la letra con acordes.');
     AI.msgs = []; openAI(`Revisa este cifrado de «${$('#sT', w).value.trim() || 'la canción'}» en tono ${$('#sK', w).value || '?'}${s.analysis ? ` (el análisis del audio dio ${s.analysis.key}, ${s.analysis.bpm} BPM)` : ''}: dime qué acordes no cuadran con el tono, si los nombres de las secciones están bien y devuélvemelo corregido.\n\n${ch}`, { title: 'Revisar cifrado con IA', task: 'chord', apply: v => { ta.value = v; refresh(); } }); };
   // 4) buscar un cifrado en internet: se abre en otra pestaña y lo pegas
+  // enlace de Drive de la secuencia (tabla aparte, solo directores)
+  const drv = $('#sDrv', w); if (drv && s.id) DB.songPrivate(s.id).then(v => { if (v != null && !drv.value) drv.value = v; drv.dataset.orig = v || ''; });
   // enlace del cifrado: buscarlo en Cifra Club y pegar el enlace
   $('#sCUfind', w).onclick = () => { const t = $('#sT', w).value.trim(); if (!t) return toast('Escribe primero el nombre de la canción.'); openWeb(chordSiteUrl(t, $('#sA', w).value.trim(), 'cifraclub.com')); toast('Abre la versión que quieras, copia el enlace de la página y pégalo aquí.', 5000); };
   $('#sCU', w).addEventListener('change', () => { s.meta = Object.assign({}, s.meta, { chordUrl: $('#sCU', w).value.trim() }); });
@@ -2223,6 +2231,11 @@ document.addEventListener('contextmenu', e => {
 document.addEventListener('click', ctxClose); document.addEventListener('scroll', e => { if (CTX.el && !CTX.el.contains(e.target) && Date.now() - (CTX.t || 0) > 250) ctxClose(); }, true); window.addEventListener('resize', ctxClose);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') ctxClose(); });
 
+// guarda el enlace de Drive cuando se guarda la canción (lo llama ui.js después de guardar)
+async function saveDriveLink(w, id) { const drv = $('#sDrv', w); if (!drv || !id) return; const v = drv.value.trim(); if (v === (drv.dataset.orig || '')) return;
+  if (v && !/^https:\/\/(drive|docs)\.google\.com\//.test(v)) { toast('El enlace de Drive no parece de Google Drive; no lo guardé.', 5000); return; }
+  try { await DB.savePrivate(id, v); } catch (e) { toast('No pude guardar el enlace de Drive: ' + (e.message || e), 6000); } }
+
 /* ================= RF App: la app ================= */
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -2503,7 +2516,7 @@ function viewService(id) {
   const byRole = {}; s.team.forEach(t => { (byRole[t.role] = byRole[t.role] || []).push(t); });
   const roleCard = t => { const m = mem(t.member_id) || { name: '?' }; const mine = t.member_id === me().id; const st = t.status === 'ok' ? '<span class="pill ok">Confirmado</span>' : t.status === 'no' ? '<span class="pill bad">No puede</span>' : '<span class="pill warn">Sin confirmar</span>';
     return `<div class="role">${avt(m, '', '')}<div class="tx"><b>${esc(m.name)}</b><small>${esc(t.role)}</small><div class="links" style="margin-top:5px">${st}${dir && VOICE(t.role) ? `<button class="pill${t.chooses ? ' gold' : ''}" data-chooses="${t.id}:${t.chooses ? 0 : 1}" title="Puede elegir canciones para este servicio">${t.chooses ? '✓ Elige canciones' : 'Elige canciones'}</button>` : !dir && t.chooses ? '<span class="pill gold">Elige canciones</span>' : ''}</div></div>${dir ? `<button class="ib" data-unassign="${t.id}" aria-label="Quitar">${ic('x')}</button>` : mine && t.status !== 'ok' ? `<button class="btn small primary" data-confirm="${t.id}">Confirmo</button>` : ''}</div>`; };
-  return `<div class="wrap"><div class="top"><button class="ib" data-back="services" aria-label="Volver">${ic('back')}</button><div style="flex:1;min-width:0"><div class="eyebrow">${esc(s.name || 'Servicio')}${s.time ? ' · ' + fmtTime(s.time) : ''}</div><h1>${cap(dLong.format(d))}</h1></div>${dir ? `<button class="btn small" data-editsvc="${s.id}">${ic('edit')}Editar</button>` : ''}</div>
+  return `<div class="wrap"><div class="top"><button class="ib" data-back="services" aria-label="Volver">${ic('back')}</button><div style="flex:1;min-width:0"><div class="eyebrow">${esc(s.name || 'Servicio')}${s.time ? ' · ' + fmtTime(s.time) : ''}</div><h1>${cap(dLong.format(d))}</h1></div><a class="btn small" target="_blank" rel="noopener" href="${gcal((s.name || 'Servicio') + ' · RF', new Date(s.date + 'T' + ((s.time || '10:00').slice(0, 5)) + ':00'), 150, '', 'https://app.rfortalezas.com')}" title="Agregar este servicio a tu Google Calendar">${ic('cal')}Agendar</a>${dir ? `<button class="btn small" data-editsvc="${s.id}">${ic('edit')}Editar</button>` : ''}</div>
     <div class="grid2">
       <section class="card"><div class="sechead"><h3>Ensayo</h3><span class="sp"></span>${rh ? `<a class="btn small" target="_blank" rel="noopener" href="${gcal('Ensayo · ' + (s.name || 'Servicio'), rh, 120, s.rehearsal_place, s.rehearsal_notes)}">${ic('cal')}Al calendario</a>` : ''}</div>
         ${rh ? `<div class="facts" style="margin-top:12px"><div class="fact"><small>Día</small><b>${cap(dShort.format(rh))}</b></div><div class="fact"><small>Hora</small><b>${fmtTime(s.rehearsal_at.slice(11))}</b></div><div class="fact"><small>Lugar</small><b style="font-family:var(--ui);font-size:15px;padding-top:4px">${esc(s.rehearsal_place || '—')}</b></div></div>${s.rehearsal_notes ? `<p class="hint" style="margin:10px 0 0">${esc(s.rehearsal_notes)}</p>` : ''}`
@@ -2546,7 +2559,7 @@ function viewSong(id) {
   const used = upcoming().filter(sv => sv.songs.some(x => x.song_id === id));
   return `<div class="wrap"><div class="sheet-top"><button class="ib" data-back="${ST.tab}" aria-label="Volver">${ic('back')}</button><div class="tx"><div class="eyebrow">${esc(s.artist || '')}</div><h1>${esc(s.title)}</h1>
       <div class="facts"><div class="fact"><small>Tono</small><b>${esc(key || '—')}</b></div><div class="fact"><small>Tempo</small><b>${s.bpm ? s.bpm + ' <span style="font-size:13px;color:var(--muted)">BPM</span>' : '—'}</b></div><div class="fact"><small>Compás</small><b>${s.meter || 4}/4</b></div>${used.length ? `<div class="fact"><small>Se canta</small><b style="font-family:var(--ui);font-size:14px;padding-top:5px">${used.map(u => cap(dShort.format(pD(u.date)))).join(', ')}</b></div>` : ''}</div></div>
-      <div class="links">${s.youtube ? `<a class="lk yt big" target="_blank" rel="noopener" href="${esc(s.youtube)}">${ic('yt')}Escuchar en YouTube</a>` : ''}${s.spotify ? `<a class="lk sp big" target="_blank" rel="noopener" href="${esc(s.spotify)}">${ic('sp')}Escuchar en Spotify</a>` : ''}${s.meta && s.meta.chordUrl ? `<button class="lk big" data-chordurl="${s.id}">${ic('music')}Ver cifrado</button>` : ''}${!s.youtube && !s.spotify ? '<span class="pill warn">Falta el enlace de la versión original</span>' : ''}<button class="btn small" data-editsong="${s.id}">${ic('edit')}Editar</button></div></div>
+      <div class="links">${s.youtube ? `<a class="lk yt big" target="_blank" rel="noopener" href="${esc(s.youtube)}">${ic('yt')}Escuchar en YouTube</a>` : ''}${s.spotify ? `<a class="lk sp big" target="_blank" rel="noopener" href="${esc(s.spotify)}">${ic('sp')}Escuchar en Spotify</a>` : ''}${s.meta && s.meta.chordUrl ? `<button class="lk big" data-chordurl="${s.id}">${ic('music')}Ver cifrado</button>` : ''}${isDir() ? `<button class="lk big" data-drv="${s.id}" title="Solo lo ven los directores">${ic('cloud')}Secuencia en Drive</button>` : ''}${!s.youtube && !s.spotify ? '<span class="pill warn">Falta el enlace de la versión original</span>' : ''}<button class="btn small" data-editsong="${s.id}">${ic('edit')}Editar</button></div></div>
     <div class="tools"><div class="seg"><button class="${mode === 'lyrics' ? 'on' : ''}" data-mode="lyrics">Letra</button><button class="${mode === 'chords' ? 'on' : ''}" data-mode="chords"${hasC ? '' : ' disabled title="Esta canción todavía no tiene acordes"'}>Cifrado</button><button class="${mode === 'nash' ? 'on' : ''}" data-mode="nash"${hasC ? '' : ' disabled'}>Números</button><button class="${mode === 'latin' ? 'on' : ''}" data-mode="latin"${hasC ? '' : ' disabled'} title="Acordes en Do, Re, Mi">Do Re Mi</button></div>
       ${mode !== 'lyrics' && hasC ? `<div class="tr" aria-label="Transponer"><button data-semi="-1" aria-label="Bajar medio tono">−</button><span>${esc(key || '—')}</span><button data-semi="1" aria-label="Subir medio tono">+</button></div>${sh.semi ? `<button class="btn small ghost" data-semi="0">Tono original</button>` : ''}` : ''}
       <button class="btn small ghost" data-big>${sh.big ? 'A−' : 'A+'}</button><button class="btn small ghost" data-export="${s.id}">${ic("dl")}Exportar</button></div>
@@ -2692,6 +2705,8 @@ function viewMe() {
       <div class="field"><label>Lo que tocas o cantas</label><div class="links" id="pRoles">${ROLES.map(r => `<button class="pill${(m.roles || []).includes(r) ? ' gold' : ''}" data-role="${esc(r)}" type="button">${esc(r)}</button>`).join('')}</div></div>
       <div><button class="btn primary" data-act="saveme">Guardar</button></div></section>
     ${installCard()}
+    <section class="card inst col"><div class="instt"><span class="gd">${ic('cal')}</span><div class="tx"><b>Tus servicios y ensayos en tu calendario</b><small>Te suscribes una vez y aparecen solos todos los servicios y ensayos donde estás. Si cambia una hora, se actualiza sin que hagas nada.</small></div></div>
+      <div class="links"><button class="btn small primary" data-calsub="google">Google Calendar</button><button class="btn small" data-calsub="apple">iPhone / Mac</button><button class="btn small ghost" data-calsub="copy">Copiar enlace</button></div></section>
     ${isDir() ? driveCard() : ''}
     ${DB.mode === 'demo' ? '' : `<section class="card"><div class="sechead"><h3>Tu contraseña</h3></div><p class="hint" style="margin:6px 0 12px">Créala para entrar con correo y contraseña, sin esperar el código. Mínimo 8 caracteres.</p>
       <div class="links"><input class="in" id="pPw" type="password" autocomplete="new-password" placeholder="Nueva contraseña" style="flex:1;min-width:180px"><button class="btn primary" data-act="setpw">Guardar contraseña</button></div></section>`}
@@ -2824,6 +2839,7 @@ function editSong(id, after) {
     <div class="fgrid"><div class="field"><label for="sK">Tono</label><select class="in" id="sK"><option value="">—</option>${['C', 'C#', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B', 'Cm', 'C#m', 'Dm', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'Bbm', 'Bm'].map(k => `<option${k === s.key ? ' selected' : ''}>${k}</option>`).join('')}</select></div><div class="field"><label for="sB">Tempo (BPM)</label><input class="in" id="sB" type="number" inputmode="numeric" value="${esc(s.bpm || '')}"></div></div>
     <div class="field lnk"><label for="sY">Versión original en YouTube</label><input class="in" id="sY" value="${esc(s.youtube || '')}" placeholder="https://youtube.com/…"></div>
     <div class="field lnk"><label for="sS">Versión original en Spotify</label><input class="in" id="sS" value="${esc(s.spotify || '')}" placeholder="https://open.spotify.com/track/…"></div>
+    ${isDir() ? `<div class="field lnk"><label for="sDrv">Secuencia en Google Drive <small class="hint">(solo la ven los directores)</small></label><input class="in" id="sDrv" placeholder="https://drive.google.com/…"><small class="hint" id="sDrvH">${s.drive_folder_id ? 'También está en la nube de RF Playback (se puso sola al subirla desde Playback).' : ''}</small></div>` : ''}
     <div class="field lnk"><label for="sCU">Enlace del cifrado <small class="hint">(Cifra Club, LaCuerda…)</small></label><div style="display:flex;gap:6px"><input class="in" id="sCU" value="${esc((s.meta && s.meta.chordUrl) || '')}" placeholder="https://www.cifraclub.com/…" style="flex:1"><button type="button" class="btn small ghost" id="sCUfind" title="Buscar el cifrado">${ic('search')}</button></div></div>
     <div class="field tagf"><label>Etiquetas <span class="hint" style="font-weight:400">· para filtrar y escoger más rápido</span></label><div class="cbar wrapc" id="sTg"></div></div>
     </div><div class="field sedit-c"><label for="sC">Letra con acordes</label>
@@ -2890,7 +2906,7 @@ function editSong(id, after) {
       let ch = ta.value; if (looksChordsOver(ch)) ch = fromChordsOver(ch);
       Object.assign(s, { title: t, artist: $('#sA', w).value.trim(), key: $('#sK', w).value, bpm: +$('#sB', w).value || null, youtube: $('#sY', w).value.trim(), spotify: $('#sS', w).value.trim(), meta: Object.assign({}, s.meta || {}, { chordUrl: ($('#sCU', w).value || '').trim() }), chart: ch, tags, meta: s.meta || null, analysis: s.analysis || null });
       if (!s.youtube && !s.spotify) toast('Recuerda agregar el enlace de la versión original para que el equipo la pueda sacar.', 4000); else if (!id) toast('Canción agregada. Queda pendiente cargar su playback en RF Playback.', 4000);
-      const saved = await DB.saveSong(s); close(); await reload(); after && after(saved || s);
+      const saved = await DB.saveSong(s); await saveDriveLink(w, (saved && saved.id) || s.id); close(); await reload(); after && after(saved || s);
     };
     const d = $('[data-del]', w); if (d) d.onclick = async () => { if (d.dataset.ok) { await DB.deleteSong(id); close(); go('songs'); await reload(); } else { d.dataset.ok = 1; d.textContent = 'Se borra de TODOS los servicios. Toca otra vez'; } };
   });
@@ -2952,6 +2968,10 @@ function bind(m) {
   on('[data-confirm]', async e => { await DB.updateAssign(e.dataset.confirm, { status: 'ok' }); toast('¡Listo! Confirmaste.'); await reload(); });
   on('[data-decline]', async e => { await DB.updateAssign(e.dataset.decline, { status: 'no' }); toast('Le avisamos al director para que busque reemplazo.'); await reload(); });
   on('[data-choose]', e => chooseSongs(e.dataset.choose));
+  on('[data-calsub]', async e => { try { const u = await DB.calUrl(), wc = u.replace(/^https?:/, 'webcal:'); const how = e.dataset.calsub;
+    if (how === 'google') { window.open('https://calendar.google.com/calendar/r?cid=' + encodeURIComponent(wc), '_blank', 'noopener'); toast('En Google Calendar dale «Agregar». Los cambios pueden tardar unas horas en verse allá.', 6000); }
+    else if (how === 'apple') { location.href = wc; }
+    else { await navigator.clipboard.writeText(u); toast('Enlace copiado. En tu calendario busca «Agregar calendario desde URL» y pégalo.', 6000); } } catch (err) { toast(err.message || 'No pude crear el enlace del calendario', 5000); } });
   on('[data-smenu]', e => { const [sid, i] = e.dataset.smenu.split(':'); svcSongMenu(sid, +i); });
   on('[data-editsvc]', e => editService(e.dataset.editsvc));
   on('[data-addteam]', e => addTeam(e.dataset.addteam));
@@ -2965,6 +2985,9 @@ function bind(m) {
   on('[data-viewphoto]', e => viewPhoto(e.dataset.viewphoto));
   $$('[data-photo]', m).forEach(inp => inp.onchange = async () => { const f = inp.files && inp.files[0]; if (!f) return; try { const photo = await photoData(f); const who = Object.assign({}, mem(inp.dataset.photo)); who.photo = photo; await DB.saveMember(who); toast('Foto actualizada.'); await reload(); } catch (x) { toast(x.message, 4000); } });
   on('[data-nophoto]', async e => { const who = Object.assign({}, mem(e.dataset.nophoto), { photo: '' }); await DB.saveMember(who); await reload(); });
+  on('[data-drv]', async e => { const so = song(e.dataset.drv); const u = await DB.songPrivate(so.id).catch(() => '');
+    const url = u || (so.drive_folder_id ? 'https://drive.google.com/drive/folders/' + so.drive_folder_id : '');
+    if (url) window.open(url, '_blank', 'noopener'); else { toast('Esta canción no tiene enlace de Drive todavía. Pónselo en «Editar».', 5000); } });
   on('[data-chordurl]', e => { const so = song(e.dataset.chordurl); openChordPage(so.meta.chordUrl, so.title); });
   on('[data-webchords]', e => { const so = song(e.dataset.webchords); openChordSources(so.title, so.artist || ''); });
   on('[data-listen]', e => openPlaylist(e.dataset.listen));
