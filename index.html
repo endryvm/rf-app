@@ -2236,6 +2236,23 @@ async function saveDriveLink(w, id) { const drv = $('#sDrv', w); if (!drv || !id
   if (v && !/^https:\/\/(drive|docs)\.google\.com\//.test(v)) { toast('El enlace de Drive no parece de Google Drive; no lo guardé.', 5000); return; }
   try { await DB.savePrivate(id, v); } catch (e) { toast('No pude guardar el enlace de Drive: ' + (e.message || e), 6000); } }
 
+/* cifrado copiado de una página → formato de la app: acordes en su sílaba, secciones en español, sin basura de la página */
+function tidyPasted(raw) {
+  const SEC = /^(intro|introducci[oó]n|verso|estrofa|verse|pre-?coro|pre-?chorus|coro|chorus|estribillo|puente|bridge|interludio|interlude|instrumental|solo|final|outro|ending|tag|vamp|riff)\b\s*\d*/i;
+  let lines = String(raw || '').replace(/\r/g, '').replace(/\t/g, '    ').split('\n');
+  // «Intro: G D Em C» (o entre corchetes) → título de sección + línea de acordes
+  lines = lines.flatMap(l => { const m = /^\s*\[?\s*([A-Za-zÁÉÍÓÚáéíóúñ\- ]+?\s*\d*)\s*[:\-–]\s*((?:\(?[A-G][#b]?[^\s\]]*\)?\s*(?:x\d+\s*)?)+)\]?\s*$/.exec(l);
+    if (m && SEC.test(m[1].trim())) { const ch = m[2].trim().split(/\s+/).filter(c => isChord(c.replace(/[()]/g, ''))); if (ch.length) return [m[1].trim(), ch.map(c => '[' + c.replace(/[()]/g, '') + ']').join(' ')]; }
+    return [l]; });
+  // títulos de sección sueltos («VERSO 1», «Coro:», «[Chorus]») → [Verso 1]
+  lines = lines.map(l => { const t = l.trim().replace(/^\[|\]$/g, '').replace(/:$/, '').trim(); if (t.length < 25 && SEC.test(t) && !isChord(t.split(/\s+/)[0])) return `[${ssSec(t) || (t[0].toUpperCase() + t.slice(1).toLowerCase())}]`; return l; });
+  // basura típica de las páginas: «Tom:», «Capo», tablaturas, etc.
+  lines = lines.filter(l => !/^\s*(tom|tono|key|capo|cejilla|afinaci[oó]n|tuning)\s*[:=]/i.test(l) && !/^\s*[eBGDAE]\|[-\d|hpbr\/\\~ ]+\|?\s*$/.test(l));
+  let v = lines.join('\n');
+  if (looksChordsOver(v)) v = fromChordsOver(v);
+  return v.replace(/\n{3,}/g, '\n\n').trim();
+}
+
 /* ================= RF App: la app ================= */
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -2849,7 +2866,7 @@ function editSong(id, after) {
           <div class="etr"><span class="etl">Acorde</span><div class="cbar" id="sCk" aria-label="Acordes del tono"></div></div>
         </div>
         <div class="ebody"><textarea class="in chartin" id="sC" spellcheck="false" placeholder="Toca una sección para empezar y escribe la letra. Para un acorde, pon el cursor justo antes de la sílaba y toca el acorde.&#10;&#10;[Verso 1]&#10;[G]Cuando sale el [D]sol…">${esc(s.chart || '')}</textarea><div class="cprev" id="sPrev" hidden></div></div>
-        <div class="efoot"><button type="button" class="btn small primary" id="sBuild">${ic('edit')}Constructor de acordes</button><span hidden><button type="button" id="sAud"></button><input type="file" id="sAudF" accept="audio/*" hidden><button type="button" id="sPaste"></button><button type="button" id="sImp"></button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,.usr,text/plain" hidden><button type="button" id="sGo"></button><button type="button" id="sAI"></button><button type="button" id="sSecAI"></button></span><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
+        <div class="efoot"><button type="button" class="btn small primary" id="sBuild">${ic('edit')}Constructor de acordes</button><button type="button" class="btn small" id="sPaste">${ic('copy')}Pegar cifrado</button><span hidden><button type="button" id="sAud"></button><input type="file" id="sAudF" accept="audio/*" hidden><button type="button" id="sImp"></button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,.usr,text/plain" hidden><button type="button" id="sGo"></button><button type="button" id="sAI"></button><button type="button" id="sSecAI"></button></span><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
       </div></div></div>
     <div class="links">${id && isDir() ? `<button class="btn ghost danger" data-del>${ic('trash')}Borrar de la biblioteca</button>` : ''}<span style="flex:1"></span><button class="btn primary" id="sSave">Guardar</button></div>`, (w, close) => {
     const ta = $('#sC', w);
@@ -2888,7 +2905,7 @@ function editSong(id, after) {
     if (matchMedia('(min-width:1000px)').matches) $('#sPrevT', w).click();
     // pegar un cifrado copiado de otra página (acordes arriba, letra abajo)
     $('#sPaste', w).onclick = async () => { let clip = ''; try { clip = navigator.clipboard && navigator.clipboard.readText ? await navigator.clipboard.readText() : ''; } catch (e) {}
-      if (clip && clip.trim().length > 30 && (looksChordsOver(clip) || /\[[A-G][^\]]*\]/.test(clip))) { let v = looksChordsOver(clip) ? fromChordsOver(clip.replace(/\r/g, '')) : clip; v = v.replace(/\n{3,}/g, '\n\n').trim();
+      if (clip && clip.trim().length > 30 && (looksChordsOver(clip) || /\[[A-G][^\]]*\]/.test(clip))) { let v = tidyPasted(clip);
         if (!ta.value.trim() || confirm('¿Cambio lo que hay en el editor por el cifrado que copiaste?')) { ta.value = v; ta.dispatchEvent(new Event('input')); $('#sCh', w).textContent = 'Pegué el cifrado que copiaste y lo acomodé. Revisa con la vista previa.'; if (pv.hidden) $('#sPrevT', w).click(); return; } }
       pasteModal(); };
     const pasteModal = () => modal(`${ph('Pegar cifrado')}
@@ -2896,7 +2913,7 @@ function editSong(id, after) {
       <textarea class="in chartin" id="pzT" spellcheck="false" placeholder="Pega aquí el cifrado…"></textarea>
       <div class="links"><label class="sw"><input type="checkbox" id="pzRep"${ta.value.trim() ? '' : ' checked'}> Reemplazar lo que ya hay</label><span style="flex:1"></span><button class="btn primary" id="pzGo">Acomodar</button></div>`, (w2, close2) => {
       $('#pzGo', w2).onclick = () => { let v = $('#pzT', w2).value.replace(/\r/g, ''); if (!v.trim()) return toast('Pega primero el cifrado.');
-        v = looksChordsOver(v) ? fromChordsOver(v) : v; v = v.replace(/\n{3,}/g, '\n\n').trim();
+        v = tidyPasted(v);
         ta.value = $('#pzRep', w2).checked ? v : (ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n\n' : '') + v; close2(); ta.dispatchEvent(new Event('input'));
         $('#sCh', w).textContent = 'Listo. Revisa con la vista previa que cada acorde haya quedado sobre la sílaba correcta.'; if (pv.hidden) $('#sPrevT', w).click(); };
     });
