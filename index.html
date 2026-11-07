@@ -1692,8 +1692,9 @@ function progressionChart(an, key) {
   return '[Progresión del audio]\n' + rows.join('\n');
 }
 // ver el cifrado en la página original, en una ventana encima de la app (no se copia nada solo: lo copias tú si quieres)
-const CHORD_SITES = [['Cifra Club', 'cifraclub.com'], ['Ultimate Guitar', 'ultimate-guitar.com'], ['LaCuerda', 'lacuerda.net'], ['Acordes y letras en Google', '']];
-const chordSiteUrl = (t, a, d) => 'https://www.google.com/search?q=' + encodeURIComponent(`${t} ${a || ''} ${d ? 'site:' + d : 'acordes cifrado'}`.trim().replace(/\s+/g, ' '));
+const CHORD_SITES = [['Chordify · acordes en vivo con el video', 'chordify'], ['Cifra Club', 'cifraclub.com'], ['Ultimate Guitar', 'ultimate-guitar.com'], ['LaCuerda', 'lacuerda.net'], ['Acordes y letras en Google', '']];
+const chordSiteUrl = (t, a, d) => d === 'chordify' ? 'https://chordify.net/search/' + encodeURIComponent(`${t} ${a || ''}`.trim()) : _chordSiteUrl(t, a, d);
+const _chordSiteUrl = (t, a, d) => 'https://www.google.com/search?q=' + encodeURIComponent(`${t} ${a || ''} ${d ? 'site:' + d : 'acordes cifrado'}`.trim().replace(/\s+/g, ' '));
 function openWeb(url) {
   const B = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.Browser;
   if (B && B.open) return B.open({ url, presentationStyle: 'popover' });
@@ -1703,7 +1704,7 @@ function openWeb(url) {
 }
 function openChordSources(t, a, onPaste) {
   modal(`${ph('Ver cifrado · ' + esc(t))}<p class="hint" style="margin-top:0">Se abre la página original encima de la app para verlo. Si lo quieres guardar aquí: selecciona desde el primer acorde hasta el final, cópialo, vuelve y toca <b>«Pegar cifrado»</b>. La app lo acomoda sola con secciones y acordes en su sílaba.</p>
-    <div class="list">${CHORD_SITES.map(([n, d], i) => `<button type="button" class="row click" data-cs="${i}"><span class="tx"><b>${esc(n)}</b><small>${d ? 'Buscar «' + esc(t) + '» en ' + d : 'Todas las páginas'}</small></span>${ic('back')}</button>`).join('')}</div>
+    <div class="list">${CHORD_SITES.map(([n, d], i) => `<button type="button" class="row click" data-cs="${i}"><span class="tx"><b>${esc(n)}</b><small>${d === 'chordify' ? 'Acordes sincronizados con el video, en chordify.net' : d ? 'Buscar «' + esc(t) + '» en ' + d : 'Todas las páginas'}</small></span>${ic('back')}</button>`).join('')}</div>
     ${onPaste ? '<div class="links"><span style="flex:1"></span><button class="btn primary" id="csPaste">Ya lo copié: pegar cifrado</button></div>' : ''}`, (w, close) => {
     $$('[data-cs]', w).forEach(b => b.onclick = () => { const [, d] = CHORD_SITES[+b.dataset.cs]; openWeb(chordSiteUrl(t, a, d)); });
     const pz = $('#csPaste', w); if (pz) pz.onclick = () => { close(); onPaste(); };
@@ -2035,7 +2036,7 @@ function openChordImport(o) {
       <div class="list"><button type="button" class="row click" data-cifile><span class="tx"><b>Escoger archivo</b><small>Se leen los acordes y se ponen sobre tu letra</small></span><span class="pill ok">Importa</span></button></div>
       <h4 class="cih">Solo se pueden ver</h4>
       <p class="hint">Estas páginas no tienen una forma autorizada de importar (no dan API y sus reglas prohíben copiarlas con programas). Se abren en una ventana para verlas.</p>
-      <div class="list">${CHORD_SITES.map(([n, d], i) => `<button type="button" class="row click" data-cs="${i}"><span class="tx"><b>${esc(n)}</b><small>${d || 'todas las páginas'}</small></span><span class="pill">Solo ver</span></button>`).join('')}</div>
+      <div class="list">${CHORD_SITES.map(([n, d], i) => `<button type="button" class="row click" data-cs="${i}"><span class="tx"><b>${esc(n)}</b><small>${d === 'chordify' ? 'chordify.net · acordes en vivo con el video' : d || 'todas las páginas'}</small></span><span class="pill">Solo ver</span></button>`).join('')}</div>
       <h4 class="cih">Si no aparece en ningún lado</h4>
       <div class="list"><button type="button" class="row click" data-ciaudio><span class="tx"><b>Sacar acordes de una grabación</b><small>MP3, WAV o M4A de esta versión: propone los acordes y tú corriges</small></span><span class="pill">Propuesta</span></button></div>`;
     const go = async (kind, i) => { const r = kind === 'lib' ? R.lib[i] : pcoRows[i]; L.style.opacity = .5;
