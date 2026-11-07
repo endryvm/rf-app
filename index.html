@@ -809,6 +809,10 @@ img,video,canvas,svg{max-width:100%}
 .cbpick{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:10px 0;margin-top:8px}
 .cbpt{font-size:14px;margin-bottom:8px}.cbch{display:flex;flex-wrap:wrap;gap:6px}
 .chip.warn{color:#e5484d}
+/* computadora: asistente, campanita y claro/oscuro en su propia fila debajo del logo */
+.rail-acts{display:flex;gap:8px;margin:2px 0 14px;padding:0 4px}
+.rail-acts .ib{flex:none;width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center}
+.rail-acts .ib svg{width:20px;height:20px}
 
 </style>
 <div id="root"></div>
@@ -2245,7 +2249,7 @@ const tabGo = k => k === 'stage' ? (ST.stage || 'live') : k;
 function go(tab, view) { if (tab === 'live' || tab === 'mix') ST.stage = tab; ST.tab = tab; ST.view = view || null; if (tab !== 'live') stopLive(); if (tab !== 'mix') mixStop(); else setTimeout(mixStart, 0); try { history.replaceState(null, '', '#' + tab); } catch (e) {} render(); window.scrollTo(0, 0); }
 function shell() {
   const pend = upcoming().some(s => myAssign(s).some(t => t.status === 'pending'));
-  return `<div class="app"><nav class="rail" aria-label="Secciones"><div class="brand">${logo()}<div><b>RF App</b><small>Rompiendo Fortalezas</small></div><span style="flex:1"></span>${aiBtn()}${bellBtn()}${themeBtn()}</div>
+  return `<div class="app"><nav class="rail" aria-label="Secciones"><div class="brand">${logo()}<div><b>RF App</b><small>Rompiendo Fortalezas</small></div></div><div class="rail-acts">${aiBtn()}${bellBtn()}${themeBtn()}</div>
     ${TABS.map(([k, l, i]) => `<button class="navb${tabOn(k) ? ' on' : ''}" data-tab="${tabGo(k)}">${ic(i)}${l}${k === 'home' && pend ? '<span class="pill warn">1</span>' : ''}</button>`).join('')}
     <span class="sp"></span><button class="navb${ST.tab === 'me' ? ' on' : ''}" data-tab="me">${avt(me(), 'sm')}Mi perfil</button></nav>
     <main class="main" id="main"></main>
