@@ -813,6 +813,9 @@ img,video,canvas,svg{max-width:100%}
 .rail-acts{display:flex;gap:8px;margin:2px 0 14px;padding:0 4px}
 .rail-acts .ib{flex:none;width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center}
 .rail-acts .ib svg{width:20px;height:20px}
+.srow .smenu{flex:none;width:36px;height:36px;margin-left:4px}
+.srow .smenu svg{fill:currentColor;stroke:none}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
 
 </style>
 <div id="root"></div>
@@ -2168,7 +2171,7 @@ const I = {
   team: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.5 3.3-5.5 6.5-5.5s5.9 2 6.5 5.5"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16.5 14.6c2.6.1 4.5 1.8 5 4.4"/>',
   live: '<circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>', check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
-  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  dots: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   pin: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
   yt: '<rect x="2.5" y="5" width="19" height="14" rx="4"/><path d="m10 9 5 3-5 3z" fill="currentColor"/>', sp: '<circle cx="12" cy="12" r="9.5"/><path d="M7 9.5c3.6-1 7.3-.7 10.3.9M7.6 12.6c3-.8 6-.5 8.6.8M8.3 15.5c2.4-.6 4.7-.4 6.8.6"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>', spark: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>', audio: '<path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10M21 12h0"/>', dl: '<path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/>', up: '<path d="m6 15 6-6 6 6"/>', down: '<path d="m6 9 6 6 6-6"/>', back: '<path d="M15 5 8 12l7 7"/>',
@@ -2409,6 +2412,7 @@ function rowSetSong(s, x, i, edit) {
   return `<div class="row${edit ? '' : ' click'} srow" ${edit ? '' : `data-song="${so.id}" data-key="${esc(x.key || so.key || '')}"`}><span class="pos">${i + 1}</span><span class="keyb">${esc(x.key || so.key || '—')}</span>
     <div class="tx"><b>${esc(so.title)}</b><small>${esc(so.artist || '')}${so.bpm ? ' · ' + so.bpm + ' BPM' : ''}${x.notes ? ' · ' + esc(x.notes) : ''}</small>${edit ? '' : studyLinks(so)}</div>
     ${lead ? `<span class="singer" title="La canta ${esc(lead.name)}">${avt(lead, 'sm', '')}<span>${esc(firstName(lead.name))}</span></span>` : edit ? '' : '<span class="singer none">Sin cantante</span>'}
+    ${!edit && canChoose(s) ? `<button class="ib smenu" data-smenu="${s.id}:${i}" aria-label="Opciones de la canción en este servicio" title="Tono, quién la dirige, mover o quitar">${ic('dots')}</button>` : ''}
     ${so.id && !so.from_playback && !edit ? '<span class="pill warn nopb" title="Esta canción no tiene secuencia en RF Playback: hay que cargarla antes del servicio">Falta el playback</span>' : ''}
     ${edit ? `<div class="links"><button class="ib" data-mv="${i}:-1" aria-label="Subir">${ic('up')}</button><button class="ib" data-mv="${i}:1" aria-label="Bajar">${ic('down')}</button><button class="ib" data-rm="${i}" aria-label="Quitar">${ic('x')}</button></div>` : ''}</div>`;
 }
@@ -2769,7 +2773,7 @@ function editSong(id, after) {
         <div class="ebody"><textarea class="in chartin" id="sC" spellcheck="false" placeholder="Toca una sección para empezar y escribe la letra. Para un acorde, pon el cursor justo antes de la sílaba y toca el acorde.&#10;&#10;[Verso 1]&#10;[G]Cuando sale el [D]sol…">${esc(s.chart || '')}</textarea><div class="cprev" id="sPrev" hidden></div></div>
         <div class="efoot"><button type="button" class="btn small primary" id="sBuild">${ic('edit')}Constructor de acordes</button><span hidden><button type="button" id="sAud"></button><input type="file" id="sAudF" accept="audio/*" hidden><button type="button" id="sPaste"></button><button type="button" id="sImp"></button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,.usr,text/plain" hidden><button type="button" id="sGo"></button><button type="button" id="sAI"></button><button type="button" id="sSecAI"></button></span><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
       </div></div></div>
-    <div class="links">${id && isDir() ? `<button class="btn ghost danger" data-del>${ic('trash')}Eliminar</button>` : ''}<span style="flex:1"></span><button class="btn primary" id="sSave">Guardar</button></div>`, (w, close) => {
+    <div class="links">${id && isDir() ? `<button class="btn ghost danger" data-del>${ic('trash')}Borrar de la biblioteca</button>` : ''}<span style="flex:1"></span><button class="btn primary" id="sSave">Guardar</button></div>`, (w, close) => {
     const ta = $('#sC', w);
     w.querySelector('.panel').classList.add('xl'); // en computadora: editor grande con la vista previa al lado
     ta.addEventListener('paste', () => setTimeout(() => { if (looksChordsOver(ta.value)) { ta.value = fromChordsOver(ta.value); $('#sCh', w).textContent = 'Acomodé los acordes dentro de la letra. Revisa que hayan quedado sobre la sílaba correcta.'; } }, 0));
@@ -2826,7 +2830,7 @@ function editSong(id, after) {
       if (!s.youtube && !s.spotify) toast('Recuerda agregar el enlace de la versión original para que el equipo la pueda sacar.', 4000); else if (!id) toast('Canción agregada. Queda pendiente cargar su playback en RF Playback.', 4000);
       const saved = await DB.saveSong(s); close(); await reload(); after && after(saved || s);
     };
-    const d = $('[data-del]', w); if (d) d.onclick = async () => { if (d.dataset.ok) { await DB.deleteSong(id); close(); go('songs'); await reload(); } else { d.dataset.ok = 1; d.textContent = 'Toca otra vez para eliminar'; } };
+    const d = $('[data-del]', w); if (d) d.onclick = async () => { if (d.dataset.ok) { await DB.deleteSong(id); close(); go('songs'); await reload(); } else { d.dataset.ok = 1; d.textContent = 'Se borra de TODOS los servicios. Toca otra vez'; } };
   });
 }
 function editService(id) {
@@ -2886,6 +2890,7 @@ function bind(m) {
   on('[data-confirm]', async e => { await DB.updateAssign(e.dataset.confirm, { status: 'ok' }); toast('¡Listo! Confirmaste.'); await reload(); });
   on('[data-decline]', async e => { await DB.updateAssign(e.dataset.decline, { status: 'no' }); toast('Le avisamos al director para que busque reemplazo.'); await reload(); });
   on('[data-choose]', e => chooseSongs(e.dataset.choose));
+  on('[data-smenu]', e => { const [sid, i] = e.dataset.smenu.split(':'); svcSongMenu(sid, +i); });
   on('[data-editsvc]', e => editService(e.dataset.editsvc));
   on('[data-addteam]', e => addTeam(e.dataset.addteam));
   on('[data-chooses]', async e => { const [id, v] = e.dataset.chooses.split(':'); await DB.updateAssign(id, { chooses: v === '1' }); await reload(); });
@@ -2985,6 +2990,28 @@ function viewLogin(err) {
   try { matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (!document.documentElement.dataset.theme) setTheme(''); }); } catch (e) {}
   if ('serviceWorker' in navigator && location.protocol === 'https:' && window.RF_CFG && !isNativeApp()) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
+
+/* opciones de una canción DENTRO de un servicio: no toca la canción de la biblioteca */
+function svcSongMenu(sid, i) {
+  const sv = ST.services.find(x => x.id === sid); if (!sv || !canChoose(sv)) return; const x = sv.songs[i]; if (!x) return; const so = song(x.song_id) || { title: '(canción borrada)' };
+  const save = async l => { await DB.setServiceSongs(sid, l.map((y, k) => Object.assign({}, y, { position: k }))); await reload(); };
+  const team = [...new Map(sv.team.map(t => [t.member_id, mem(t.member_id)]).filter(([, m]) => m)).values()];
+  const others = ST.members.filter(m => !team.some(t => t.id === m.id));
+  modal(`${ph(esc(so.title))}<p class="hint" style="margin-top:0">Solo cambia en este servicio. La canción de la biblioteca no se toca.</p>
+    <div class="field"><label>Tono para este servicio</label><div class="chips">${['C','C#','Db','D','Eb','E','F','F#','G','Ab','A','Bb','B'].map(k => `<button type="button" class="chip${(x.key || so.key) === k ? ' on' : ''}" data-k="${k}">${k}</button>`).join('')}</div></div>
+    <div class="field"><label>Quién la dirige</label><select class="in" id="smL"><option value="">— Nadie todavía —</option>${team.length ? `<optgroup label="En este servicio">${team.map(m => `<option value="${m.id}"${m.id === x.lead_id ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</optgroup>` : ''}<optgroup label="Todo el equipo">${others.map(m => `<option value="${m.id}"${m.id === x.lead_id ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</optgroup></select></div>
+    <div class="field"><label>Nota para el equipo</label><input class="in" id="smN" value="${esc(x.notes || '')}" placeholder="Ej: empieza solo piano, repetir coro 2 veces"></div>
+    <div class="links"><button class="btn small" data-mv="-1"${i === 0 ? ' disabled' : ''}>${ic('up')}Subir</button><button class="btn small" data-mv="1"${i === sv.songs.length - 1 ? ' disabled' : ''}>${ic('down')}Bajar</button>${so.id ? `<button class="btn small ghost" data-ed>${ic('edit')}Editar la canción</button>` : ''}</div>
+    <div class="links"><button class="btn ghost danger" data-rmsvc>${ic('x')}Quitar de este servicio</button><span style="flex:1"></span><button class="btn primary" id="smOk">Guardar</button></div>`, (w, close) => {
+    let key = x.key || so.key || '';
+    $$('[data-k]', w).forEach(b => b.onclick = () => { key = b.dataset.k; $$('[data-k]', w).forEach(z => z.classList.toggle('on', z === b)); });
+    const list = () => sv.songs.map(y => Object.assign({}, y));
+    $('#smOk', w).onclick = async () => { const l = list(); Object.assign(l[i], { key, lead_id: $('#smL', w).value || null, notes: $('#smN', w).value.trim() }); close(); await save(l); toast('Guardado en este servicio.'); };
+    $$('[data-mv]', w).forEach(b => b.onclick = async () => { const d = +b.dataset.mv, l = list(), j = i + d; if (j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; close(); await save(l); });
+    $('[data-rmsvc]', w).onclick = async () => { const l = list(); l.splice(i, 1); close(); await save(l); toast(`Quité «${so.title}» de este servicio. Sigue en la biblioteca.`, 4000); };
+    const ed = $('[data-ed]', w); if (ed) ed.onclick = () => { close(); editSong(so.id); };
+  });
+}
 
 </script>
 </body></html>
