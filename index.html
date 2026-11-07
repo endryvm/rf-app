@@ -793,6 +793,22 @@ img,video,canvas,svg{max-width:100%}
 #ciL .row .tx{flex:1;min-width:0;display:flex;flex-direction:column}#ciL .row small{color:var(--muted)}
 #ciL .pill{flex:none}.pill.ok{background:rgba(48,164,108,.15);color:var(--ok)}
 .ciprev{max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:12px}
+/* cifrado de la página dentro de la app */
+.cpage{height:min(72vh,900px);border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#fff;margin-bottom:10px}
+.cpage iframe{width:100%;height:100%;border:0;display:block}
+/* constructor de acordes */
+.cbld{max-height:58vh;overflow:auto;padding:4px 2px;font-size:17px;line-height:1}
+.cbsec{margin:14px 0 6px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.cbgap{height:8px}
+.cbline{display:flex;flex-wrap:wrap;align-items:flex-end;row-gap:6px;margin-bottom:6px}
+.cbw{display:inline-flex;flex-direction:column;justify-content:flex-end;cursor:pointer;border-radius:6px;padding:0 1px;min-height:38px}
+.cbw i{font-style:normal;padding:2px 0;border-bottom:2px solid transparent}
+.cbw:hover i{border-bottom-color:var(--line)}
+.cbw.sel{background:var(--card)}
+.cbc{font-size:14px;font-weight:700;color:var(--gold,#c9a227);line-height:1.2}
+.cbpick{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:10px 0;margin-top:8px}
+.cbpt{font-size:14px;margin-bottom:8px}.cbch{display:flex;flex-wrap:wrap;gap:6px}
+.chip.warn{color:#e5484d}
 
 </style>
 <div id="root"></div>
@@ -1782,6 +1798,11 @@ function studioBind(s, w, ta, h) {
   $('#sAI', w).onclick = () => { const ch = ta.value.trim(); if (!ch) return toast('Primero pon la letra con acordes.');
     AI.msgs = []; openAI(`Revisa este cifrado de «${$('#sT', w).value.trim() || 'la canción'}» en tono ${$('#sK', w).value || '?'}${s.analysis ? ` (el análisis del audio dio ${s.analysis.key}, ${s.analysis.bpm} BPM)` : ''}: dime qué acordes no cuadran con el tono, si los nombres de las secciones están bien y devuélvemelo corregido.\n\n${ch}`, { title: 'Revisar cifrado con IA', task: 'chord', apply: v => { ta.value = v; refresh(); } }); };
   // 4) buscar un cifrado en internet: se abre en otra pestaña y lo pegas
+  // enlace del cifrado: buscarlo en Cifra Club y pegar el enlace
+  $('#sCUfind', w).onclick = () => { const t = $('#sT', w).value.trim(); if (!t) return toast('Escribe primero el nombre de la canción.'); openWeb(chordSiteUrl(t, $('#sA', w).value.trim(), 'cifraclub.com')); toast('Abre la versión que quieras, copia el enlace de la página y pégalo aquí.', 5000); };
+  $('#sCU', w).addEventListener('change', () => { s.meta = Object.assign({}, s.meta, { chordUrl: $('#sCU', w).value.trim() }); });
+  // constructor: tocas una palabra y le pones el acorde
+  $('#sBuild', w).onclick = () => { if (!ta.value.trim()) return toast('Primero pon la letra (con «Buscar la canción» o pegándola).'); openChordBuilder(ta.value, $('#sK', w).value, v => { ta.value = v; refresh(); msg('Acordes puestos con el constructor. Dale «Guardar» cuando termines.'); }); };
   $('#sGo', w).onclick = () => { const t = $('#sT', w).value.trim(); if (!t) { $('#sT', w).focus(); return toast('Escribe primero el nombre de la canción.'); }
     openChordImport({ title: t, artist: $('#sA', w).value.trim(), selfId: s.id, apply: applyImported, file: () => $('#sImpF', w).click(), audio: () => $('#sAudF', w).click() }); };
   // cifrado importado → vista previa sobre la letra guardada → aplicar al editor (se guarda con «Guardar»)
@@ -2049,6 +2070,66 @@ function openChordImport(o) {
     $('[data-cifile]', w).onclick = () => { close(); o.file(); };
     $('[data-ciaudio]', w).onclick = () => { close(); o.audio(); };
   });
+}
+
+
+/* ================= Ver el cifrado de la página dentro de la app ================= */
+function openChordPage(url, title) {
+  if (!/^https?:\/\//i.test(url || '')) return toast('El enlace del cifrado no es válido.');
+  const B = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.Browser;
+  if (B && B.open) return B.open({ url, presentationStyle: 'popover' }); // app de teléfono: ventana del sistema encima de la app
+  const host = (() => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return ''; } })();
+  modal(`${ph('Cifrado · ' + esc(title || ''))}<div class="cpage"><iframe src="${esc(url)}" title="Cifrado" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe></div>
+    <div class="links"><span class="hint" style="flex:1">${esc(host)} · si la página no carga aquí, ábrela con el botón</span><button class="btn small" id="cpOpen">Abrir la página</button></div>`, (w) => {
+    $('#cpOpen', w).onclick = () => openWeb(url);
+  }, 'xl');
+}
+
+/* ================= Constructor de acordes: tocas una palabra → escoges el acorde ================= */
+function openChordBuilder(chart, key, done) {
+  let lines = String(chart || '').replace(/\r/g, '').split('\n');
+  const chips = () => (key ? keyChords(key) : ['C', 'D', 'Em', 'F', 'G', 'Am', 'Bm']);
+  let last = '';
+  modal(`${ph('Constructor de acordes')}<p class="hint" style="margin-top:0">Toca la palabra (o la sílaba) donde cambia el acorde y escoge cuál. Toca un acorde puesto para cambiarlo o quitarlo.${key ? ' Tono: <b>' + esc(key) + '</b>' : ''}</p>
+    <div class="cbld" id="cbL"></div>
+    <div class="cbpick" id="cbP" hidden></div>
+    <div class="links"><span style="flex:1"></span><button class="btn primary" id="cbOk">Listo</button></div>`, (w, close) => {
+    const L = $('#cbL', w), P = $('#cbP', w);
+    // cada línea se parte en piezas: acordes ya puestos y palabras (con sus sílabas si la palabra es larga)
+    const draw = () => {
+      L.innerHTML = lines.map((raw, li) => {
+        const sec = /^\s*\[([^\]]+)\]\s*$/.exec(raw); if (sec && !isChord(sec[1])) return `<div class="cbsec">${esc(sec[1])}</div>`;
+        if (!raw.trim()) return '<div class="cbgap"></div>';
+        let html = '', i = 0; const re = /\[([^\]]+)\]/g; let m, pos = 0; const plain = [];
+        // posiciones de texto sin acordes y acordes con su posición
+        let text = '', chs = []; while ((m = re.exec(raw))) { text += raw.slice(pos, m.index); if (isChord(m[1])) chs.push({ at: text.length, ch: m[1] }); else text += m[0]; pos = re.lastIndex; } text += raw.slice(pos);
+        const tokens = []; const tr = /(\s+)|([^\s]+)/g; let t;
+        while ((t = tr.exec(text))) { if (t[1]) tokens.push({ sp: t[1] }); else { const w = t[2], base = t.index; const parts = syl(w); let o = 0; parts.forEach(pp => { tokens.push({ w: pp, at: base + o }); o += pp.length; }); } }
+        tokens.forEach(tk => { if (tk.sp) { html += tk.sp.replace(/ /g, '&nbsp;'); return; }
+          const c = chs.filter(x => x.at === tk.at); html += `<span class="cbw${c.length ? ' has' : ''}" data-l="${li}" data-a="${tk.at}">${c.map(x => `<b class="cbc" data-l="${li}" data-a="${tk.at}" data-c="${esc(x.ch)}">${esc(x.ch)}</b>`).join('')}<i>${esc(tk.w)}</i></span>`; });
+        const tail = chs.filter(x => x.at >= text.length); tail.forEach(x => { html += ` <span class="cbw has" data-l="${li}" data-a="${text.length}"><b class="cbc" data-l="${li}" data-a="${text.length}" data-c="${esc(x.ch)}">${esc(x.ch)}</b><i>&nbsp;</i></span>`; });
+        return `<div class="cbline">${html}</div>`;
+      }).join('');
+      $$('.cbw', L).forEach(el => el.onclick = e => { e.stopPropagation(); pick(+el.dataset.l, +el.dataset.a, (e.target.closest('.cbc') || {}).dataset ? e.target.closest('.cbc') && e.target.closest('.cbc').dataset.c : '', el); });
+    };
+    // sílabas sencillas en español para poder poner el acorde a mitad de palabra
+    function syl(w) { if (w.length < 5) return [w]; const out = []; const re = /[^aeiouáéíóúü]*[aeiouáéíóúü]+(?:[^aeiouáéíóúü](?=[^aeiouáéíóúü]))?/gi; let m, used = 0; while ((m = re.exec(w)) && m[0]) { out.push(m[0]); used = re.lastIndex; } if (used < w.length) { if (out.length) out[out.length - 1] += w.slice(used); else out.push(w.slice(used)); } return out.length ? out : [w]; }
+    const setChord = (li, at, ch) => {
+      const raw = lines[li]; let text = '', chs = [], pos = 0; const re = /\[([^\]]+)\]/g; let m;
+      while ((m = re.exec(raw))) { text += raw.slice(pos, m.index); if (isChord(m[1])) chs.push({ at: text.length, ch: m[1] }); else text += m[0]; pos = re.lastIndex; } text += raw.slice(pos);
+      chs = chs.filter(x => x.at !== at); if (ch) chs.push({ at, ch });
+      chs.sort((a, b) => b.at - a.at); let out = text; chs.forEach(x => { out = out.slice(0, x.at) + `[${x.ch}]` + out.slice(x.at); }); lines[li] = out;
+    };
+    function pick(li, at, cur, el) {
+      $$('.cbw.sel', L).forEach(x => x.classList.remove('sel')); el.classList.add('sel');
+      P.hidden = false; P.innerHTML = `<div class="cbpt">${cur ? 'Cambiar <b>' + esc(cur) + '</b>' : 'Acorde para «' + esc(el.textContent.trim()) + '»'}</div><div class="cbch">${(last && !chips().includes(last) ? [last] : []).concat(chips()).map(c => `<button type="button" class="chip" data-pc="${esc(c)}">${esc(c)}</button>`).join('')}<button type="button" class="chip" data-pc="?">Otro…</button>${cur ? '<button type="button" class="chip warn" data-pc="">Quitar</button>' : ''}</div>`;
+      $$('[data-pc]', P).forEach(b => b.onclick = () => { let c = b.dataset.pc; if (c === '?') { c = (prompt('Escribe el acorde (ej: G/B, Dsus4, F#m7):') || '').trim(); if (!c) return; if (!isChord(c)) return toast('Ese acorde no lo reconozco.'); }
+        setChord(li, at, c); if (c) last = c; P.hidden = true; draw(); });
+      P.scrollIntoView({ block: 'nearest' });
+    }
+    $('#cbOk', w).onclick = () => { done(lines.join('\n')); close(); };
+    draw();
+  }, 'xl');
 }
 
 /* ================= RF App: la app ================= */
@@ -2373,7 +2454,7 @@ function viewSong(id) {
   const used = upcoming().filter(sv => sv.songs.some(x => x.song_id === id));
   return `<div class="wrap"><div class="sheet-top"><button class="ib" data-back="${ST.tab}" aria-label="Volver">${ic('back')}</button><div class="tx"><div class="eyebrow">${esc(s.artist || '')}</div><h1>${esc(s.title)}</h1>
       <div class="facts"><div class="fact"><small>Tono</small><b>${esc(key || '—')}</b></div><div class="fact"><small>Tempo</small><b>${s.bpm ? s.bpm + ' <span style="font-size:13px;color:var(--muted)">BPM</span>' : '—'}</b></div><div class="fact"><small>Compás</small><b>${s.meter || 4}/4</b></div>${used.length ? `<div class="fact"><small>Se canta</small><b style="font-family:var(--ui);font-size:14px;padding-top:5px">${used.map(u => cap(dShort.format(pD(u.date)))).join(', ')}</b></div>` : ''}</div></div>
-      <div class="links">${s.youtube ? `<a class="lk yt big" target="_blank" rel="noopener" href="${esc(s.youtube)}">${ic('yt')}Escuchar en YouTube</a>` : ''}${s.spotify ? `<a class="lk sp big" target="_blank" rel="noopener" href="${esc(s.spotify)}">${ic('sp')}Escuchar en Spotify</a>` : ''}${!s.youtube && !s.spotify ? '<span class="pill warn">Falta el enlace de la versión original</span>' : ''}<button class="btn small" data-editsong="${s.id}">${ic('edit')}Editar</button></div></div>
+      <div class="links">${s.youtube ? `<a class="lk yt big" target="_blank" rel="noopener" href="${esc(s.youtube)}">${ic('yt')}Escuchar en YouTube</a>` : ''}${s.spotify ? `<a class="lk sp big" target="_blank" rel="noopener" href="${esc(s.spotify)}">${ic('sp')}Escuchar en Spotify</a>` : ''}${s.meta && s.meta.chordUrl ? `<button class="lk big" data-chordurl="${s.id}">${ic('music')}Ver cifrado</button>` : ''}${!s.youtube && !s.spotify ? '<span class="pill warn">Falta el enlace de la versión original</span>' : ''}<button class="btn small" data-editsong="${s.id}">${ic('edit')}Editar</button></div></div>
     <div class="tools"><div class="seg"><button class="${mode === 'lyrics' ? 'on' : ''}" data-mode="lyrics">Letra</button><button class="${mode === 'chords' ? 'on' : ''}" data-mode="chords"${hasC ? '' : ' disabled title="Esta canción todavía no tiene acordes"'}>Cifrado</button><button class="${mode === 'nash' ? 'on' : ''}" data-mode="nash"${hasC ? '' : ' disabled'}>Números</button><button class="${mode === 'latin' ? 'on' : ''}" data-mode="latin"${hasC ? '' : ' disabled'} title="Acordes en Do, Re, Mi">Do Re Mi</button></div>
       ${mode !== 'lyrics' && hasC ? `<div class="tr" aria-label="Transponer"><button data-semi="-1" aria-label="Bajar medio tono">−</button><span>${esc(key || '—')}</span><button data-semi="1" aria-label="Subir medio tono">+</button></div>${sh.semi ? `<button class="btn small ghost" data-semi="0">Tono original</button>` : ''}` : ''}
       <button class="btn small ghost" data-big>${sh.big ? 'A−' : 'A+'}</button><button class="btn small ghost" data-export="${s.id}">${ic("dl")}Exportar</button><button class="btn small ghost" data-webchords="${s.id}">Ver cifrado en internet</button></div>
@@ -2615,8 +2696,8 @@ function editProgItem(list, i, done) {
 }
 
 /* ---------- ventanas ---------- */
-function modal(html, onBind) {
-  const w = document.createElement('div'); w.className = 'modal'; w.innerHTML = `<div class="panel" role="dialog" aria-modal="true">${html}</div>`; document.body.append(w);
+function modal(html, onBind, cls) {
+  const w = document.createElement('div'); w.className = 'modal'; w.innerHTML = `<div class="panel${cls ? ' ' + cls : ''}" role="dialog" aria-modal="true">${html}</div>`; document.body.append(w);
   try { history.pushState({ rfm: 1 }, '', location.hash || '#' + ST.tab); } catch (e) {}
   const close = fromBack => { if (!w.isConnected) return; w.remove(); document.removeEventListener('keydown', k); if (fromBack !== true && history.state && history.state.rfm) { NAV.skip = true; history.back(); } }; const k = e => { if (e.key === 'Escape') close(); };
   w._close = close;
@@ -2651,6 +2732,7 @@ function editSong(id, after) {
     <div class="fgrid"><div class="field"><label for="sK">Tono</label><select class="in" id="sK"><option value="">—</option>${['C', 'C#', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B', 'Cm', 'C#m', 'Dm', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'Bbm', 'Bm'].map(k => `<option${k === s.key ? ' selected' : ''}>${k}</option>`).join('')}</select></div><div class="field"><label for="sB">Tempo (BPM)</label><input class="in" id="sB" type="number" inputmode="numeric" value="${esc(s.bpm || '')}"></div></div>
     <div class="field lnk"><label for="sY">Versión original en YouTube</label><input class="in" id="sY" value="${esc(s.youtube || '')}" placeholder="https://youtube.com/…"></div>
     <div class="field lnk"><label for="sS">Versión original en Spotify</label><input class="in" id="sS" value="${esc(s.spotify || '')}" placeholder="https://open.spotify.com/track/…"></div>
+    <div class="field lnk"><label for="sCU">Enlace del cifrado <small class="hint">(Cifra Club, LaCuerda…)</small></label><div style="display:flex;gap:6px"><input class="in" id="sCU" value="${esc((s.meta && s.meta.chordUrl) || '')}" placeholder="https://www.cifraclub.com/…" style="flex:1"><button type="button" class="btn small ghost" id="sCUfind" title="Buscar el cifrado">${ic('search')}</button></div></div>
     <div class="field tagf"><label>Etiquetas <span class="hint" style="font-weight:400">· para filtrar y escoger más rápido</span></label><div class="cbar wrapc" id="sTg"></div></div>
     </div><div class="field sedit-c"><label for="sC">Letra con acordes</label>
       <div class="ebox">
@@ -2659,7 +2741,7 @@ function editSong(id, after) {
           <div class="etr"><span class="etl">Acorde</span><div class="cbar" id="sCk" aria-label="Acordes del tono"></div></div>
         </div>
         <div class="ebody"><textarea class="in chartin" id="sC" spellcheck="false" placeholder="Toca una sección para empezar y escribe la letra. Para un acorde, pon el cursor justo antes de la sílaba y toca el acorde.&#10;&#10;[Verso 1]&#10;[G]Cuando sale el [D]sol…">${esc(s.chart || '')}</textarea><div class="cprev" id="sPrev" hidden></div></div>
-        <div class="efoot"><button type="button" class="btn small primary" id="sAud">${ic('audio')}Sacar acordes del audio</button><input type="file" id="sAudF" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado</button><button type="button" class="btn small ghost" id="sImp">Importar archivo</button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,.usr,text/plain" hidden><button type="button" class="btn small primary" id="sGo">${ic('search')}Importar cifrado</button><button type="button" class="btn small ghost" id="sAI">${ic('spark')}Revisar con IA</button><button type="button" class="btn small ghost" id="sSecAI">${ic('spark')}Nombrar secciones</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
+        <div class="efoot"><button type="button" class="btn small primary" id="sAud">${ic('audio')}Sacar acordes del audio</button><input type="file" id="sAudF" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden><button type="button" class="btn small" id="sPaste">${ic('plus')}Pegar cifrado</button><button type="button" class="btn small ghost" id="sImp">Importar archivo</button><input type="file" id="sImpF" accept=".cho,.chordpro,.chopro,.crd,.pro,.txt,.lrc,.usr,text/plain" hidden><button type="button" class="btn small primary" id="sBuild">${ic('edit')}Constructor de acordes</button><button type="button" class="btn small" id="sGo">${ic('search')}Importar cifrado</button><button type="button" class="btn small ghost" id="sAI">${ic('spark')}Revisar con IA</button><button type="button" class="btn small ghost" id="sSecAI">${ic('spark')}Nombrar secciones</button><span class="hint" id="sCh"></span><span style="flex:1"></span><button type="button" class="btn small ghost" id="sPrevT">Vista previa</button></div>
       </div></div></div>
     <div class="links">${id && isDir() ? `<button class="btn ghost danger" data-del>${ic('trash')}Eliminar</button>` : ''}<span style="flex:1"></span><button class="btn primary" id="sSave">Guardar</button></div>`, (w, close) => {
     const ta = $('#sC', w);
@@ -2714,7 +2796,7 @@ function editSong(id, after) {
     $('#sSave', w).onclick = async () => {
       const t = $('#sT', w).value.trim(); if (!t) { $('#sT', w).focus(); toast('Ponle nombre a la canción.'); return; }
       let ch = ta.value; if (looksChordsOver(ch)) ch = fromChordsOver(ch);
-      Object.assign(s, { title: t, artist: $('#sA', w).value.trim(), key: $('#sK', w).value, bpm: +$('#sB', w).value || null, youtube: $('#sY', w).value.trim(), spotify: $('#sS', w).value.trim(), chart: ch, tags, meta: s.meta || null, analysis: s.analysis || null });
+      Object.assign(s, { title: t, artist: $('#sA', w).value.trim(), key: $('#sK', w).value, bpm: +$('#sB', w).value || null, youtube: $('#sY', w).value.trim(), spotify: $('#sS', w).value.trim(), meta: Object.assign({}, s.meta || {}, { chordUrl: ($('#sCU', w).value || '').trim() }), chart: ch, tags, meta: s.meta || null, analysis: s.analysis || null });
       if (!s.youtube && !s.spotify) toast('Recuerda agregar el enlace de la versión original para que el equipo la pueda sacar.', 4000); else if (!id) toast('Canción agregada. Queda pendiente cargar su playback en RF Playback.', 4000);
       const saved = await DB.saveSong(s); close(); await reload(); after && after(saved || s);
     };
@@ -2790,6 +2872,7 @@ function bind(m) {
   on('[data-viewphoto]', e => viewPhoto(e.dataset.viewphoto));
   $$('[data-photo]', m).forEach(inp => inp.onchange = async () => { const f = inp.files && inp.files[0]; if (!f) return; try { const photo = await photoData(f); const who = Object.assign({}, mem(inp.dataset.photo)); who.photo = photo; await DB.saveMember(who); toast('Foto actualizada.'); await reload(); } catch (x) { toast(x.message, 4000); } });
   on('[data-nophoto]', async e => { const who = Object.assign({}, mem(e.dataset.nophoto), { photo: '' }); await DB.saveMember(who); await reload(); });
+  on('[data-chordurl]', e => { const so = song(e.dataset.chordurl); openChordPage(so.meta.chordUrl, so.title); });
   on('[data-webchords]', e => { const so = song(e.dataset.webchords); openChordSources(so.title, so.artist || ''); });
   on('[data-listen]', e => openPlaylist(e.dataset.listen));
   on('[data-export]', e => openExport(song(e.dataset.export)));
