@@ -806,7 +806,7 @@ img,video,canvas,svg{max-width:100%}
 .cbw:hover i{border-bottom-color:var(--line)}
 .cbw.sel{background:var(--card)}
 .cbc{font-size:14px;font-weight:700;color:var(--gold,#c9a227);line-height:1.2}
-.cbpick{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:10px 0;margin-top:8px}
+.cbpick{position:sticky;bottom:0;background:var(--ink);border-top:1px solid var(--line);padding:10px 0;margin-top:8px}
 .cbpt{font-size:14px;margin-bottom:8px}.cbch{display:flex;flex-wrap:wrap;gap:6px}
 .chip.warn{color:#e5484d}
 /* computadora: asistente, campanita y claro/oscuro en su propia fila debajo del logo */
@@ -816,6 +816,14 @@ img,video,canvas,svg{max-width:100%}
 .srow .smenu{flex:none;width:36px;height:36px;margin-left:4px}
 .srow .smenu svg{fill:currentColor;stroke:none}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
+/* menú del clic derecho */
+.ctxm{position:fixed;z-index:9999;min-width:230px;max-width:320px;padding:6px;border-radius:12px;background:var(--ink);border:1px solid var(--line);box-shadow:0 12px 32px rgba(0,0,0,.18),0 2px 6px rgba(0,0,0,.08);animation:ctxin .08s ease-out}
+@keyframes ctxin{from{opacity:0;transform:scale(.98)}}
+.ctxm button{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;background:none;color:var(--fg);font:inherit;font-size:14px;text-align:left;border-radius:8px;cursor:pointer}
+.ctxm button:hover,.ctxm button:focus{background:var(--card);outline:0}
+.ctxm button svg,.ctxm button i{width:16px;height:16px;flex:none;opacity:.75}
+.ctxm button.dg{color:#e5484d}
+.ctxm hr{border:0;border-top:1px solid var(--line);margin:5px 4px}
 
 </style>
 <div id="root"></div>
@@ -2161,6 +2169,60 @@ async function enrichSong(so) {
   return got;
 }
 
+/* ================= Clic derecho (computadora): menú con las acciones de lo que tocas ================= */
+const CTX = { el: null };
+function ctxClose() { if (CTX.el) { CTX.el.remove(); CTX.el = null; } }
+function ctxShow(x, y, items) {
+  ctxClose(); items = items.filter(Boolean); if (!items.length) return;
+  const m = document.createElement('div'); m.className = 'ctxm'; m.setAttribute('role', 'menu');
+  m.innerHTML = items.map((it, k) => it === '-' ? '<hr>' : `<button type="button" role="menuitem" data-k="${k}"${it.danger ? ' class="dg"' : ''}>${it.icon ? ic(it.icon) : '<i></i>'}<span>${esc(it.label)}</span></button>`).join('');
+  document.body.appendChild(m); CTX.el = m; CTX.t = Date.now();
+  const r = m.getBoundingClientRect(); m.style.left = Math.min(x, innerWidth - r.width - 8) + 'px'; m.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
+  m.querySelectorAll('[data-k]').forEach(b => b.onclick = ev => { ev.stopPropagation(); const it = items[+b.dataset.k]; ctxClose(); it.run(); });
+  setTimeout(() => m.querySelector('button') && m.querySelector('button').focus({ preventScroll: true }), 0);
+}
+function ctxSongItems(so) {
+  if (!so || !so.id) return [];
+  const nx = (typeof upcoming === 'function' ? upcoming() : []).find(sv => canChoose(sv));
+  return [
+    { label: 'Abrir', icon: 'music', run: () => { ST.tab = 'songs'; ST.view = { type: 'song', id: so.id }; render(); } },
+    isDir() || canChoose(nx || {}) ? { label: 'Editar canción', icon: 'edit', run: () => editSong(so.id) } : null,
+    '-',
+    so.youtube ? { label: 'Escuchar en YouTube', icon: 'yt', run: () => window.open(so.youtube, '_blank', 'noopener') } : null,
+    so.spotify ? { label: 'Escuchar en Spotify', icon: 'sp', run: () => window.open(so.spotify, '_blank', 'noopener') } : null,
+    so.meta && so.meta.chordUrl ? { label: 'Ver cifrado', icon: 'music', run: () => openChordPage(so.meta.chordUrl, so.title) } : null,
+    { label: 'Exportar (PDF, texto, ChordPro)', icon: 'dl', run: () => openExport(so) },
+    nx && !nx.songs.some(x => x.song_id === so.id) ? '-' : null,
+    nx && !nx.songs.some(x => x.song_id === so.id) ? { label: `Agregar a ${nx.name || 'el próximo servicio'} (${cap(dShort.format(pD(nx.date)))})`, icon: 'plus', run: async () => { const l = nx.songs.map((y, k) => Object.assign({}, y, { position: k })); l.push({ song_id: so.id, key: so.key || '', lead_id: null, notes: '', position: l.length }); await DB.setServiceSongs(nx.id, l); await reload(); toast(`Agregué «${so.title}» a ${nx.name || 'el servicio'}.`); } } : null,
+    { label: 'Copiar el nombre', icon: 'copy', run: () => { try { navigator.clipboard.writeText(so.title + (so.artist ? ' — ' + so.artist : '')); toast('Copiado.'); } catch (e) {} } },
+  ];
+}
+document.addEventListener('contextmenu', e => {
+  if (!matchMedia('(pointer:fine)').matches) return;
+  if (e.target.closest('input,textarea,select,[contenteditable],.ctxm')) return;
+  const row = e.target.closest('.srow'), sEl = e.target.closest('[data-song]'), svEl = e.target.closest('[data-open]');
+  let items = [];
+  if (row) { // canción dentro de un servicio
+    const mb = row.querySelector('[data-smenu]'), so = song(row.dataset.song || (sEl && sEl.dataset.song));
+    if (mb) { const [sid, i] = mb.dataset.smenu.split(':'), sv = ST.services.find(x => x.id === sid), n = sv ? sv.songs.length : 0, I = +i;
+      const mv = async d => { const l = sv.songs.map(y => Object.assign({}, y)); const j = I + d; if (j < 0 || j >= l.length) return; [l[I], l[j]] = [l[j], l[I]]; await DB.setServiceSongs(sid, l.map((y, k) => Object.assign(y, { position: k }))); await reload(); };
+      items = [{ label: 'Tono, quién la dirige y nota…', icon: 'edit', run: () => svcSongMenu(sid, I) },
+        I > 0 ? { label: 'Subir', icon: 'up', run: () => mv(-1) } : null, I < n - 1 ? { label: 'Bajar', icon: 'down', run: () => mv(1) } : null,
+        { label: 'Quitar de este servicio', icon: 'x', danger: true, run: async () => { const l = sv.songs.filter((_, k) => k !== I).map((y, k) => Object.assign({}, y, { position: k })); await DB.setServiceSongs(sid, l); await reload(); toast(`Quité «${(so || {}).title || 'la canción'}» del servicio. Sigue en la biblioteca.`, 4000); } },
+        '-'].concat(ctxSongItems(so).filter(it => !(it && it.label && it.label.startsWith('Agregar a'))));
+    } else items = ctxSongItems(so);
+  } else if (sEl) items = ctxSongItems(song(sEl.dataset.song));
+  else if (svEl) { const sv = ST.services.find(x => x.id === svEl.dataset.open); if (sv) items = [
+    { label: 'Abrir el servicio', icon: 'calendar', run: () => { ST.view = { type: 'service', id: sv.id }; if (ST.tab !== 'services' && ST.tab !== 'home') ST.tab = 'services'; render(); } },
+    sv.songs.length ? { label: 'Escuchar el repertorio', icon: 'yt', run: () => openPlaylist(sv.id) } : null,
+    canChoose(sv) ? { label: sv.songs.length ? 'Editar repertorio' : 'Elegir canciones', icon: 'music', run: () => chooseSongs(sv.id) } : null,
+    { label: 'Preguntarle al asistente sobre este servicio', icon: 'spark', run: () => { AI.msgs = []; openAI(`Sobre el servicio «${sv.name || 'Servicio'}» del ${sv.date}: `); } }]; }
+  if (!items.filter(Boolean).length) return;
+  e.preventDefault(); ctxShow(e.clientX, e.clientY, items);
+});
+document.addEventListener('click', ctxClose); document.addEventListener('scroll', e => { if (CTX.el && !CTX.el.contains(e.target) && Date.now() - (CTX.t || 0) > 250) ctxClose(); }, true); window.addEventListener('resize', ctxClose);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') ctxClose(); });
+
 /* ================= RF App: la app ================= */
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -2171,7 +2233,7 @@ const I = {
   team: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.5 3.3-5.5 6.5-5.5s5.9 2 6.5 5.5"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16.5 14.6c2.6.1 4.5 1.8 5 4.4"/>',
   live: '<circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>', check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
-  dots: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  dots: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>', copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>', calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   pin: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
   yt: '<rect x="2.5" y="5" width="19" height="14" rx="4"/><path d="m10 9 5 3-5 3z" fill="currentColor"/>', sp: '<circle cx="12" cy="12" r="9.5"/><path d="M7 9.5c3.6-1 7.3-.7 10.3.9M7.6 12.6c3-.8 6-.5 8.6.8M8.3 15.5c2.4-.6 4.7-.4 6.8.6"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>', spark: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>', audio: '<path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10M21 12h0"/>', dl: '<path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/>', up: '<path d="m6 15 6-6 6 6"/>', down: '<path d="m6 9 6 6 6-6"/>', back: '<path d="M15 5 8 12l7 7"/>',
