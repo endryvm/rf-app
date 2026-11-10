@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RF App para Android</title>
+<link rel="icon" href="/icon-192.png">
+<meta name="theme-color" content="#000000">
+<style>
+  :root{ --oro:#d4af37; --azul:#0a84ff; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; }
+  body{
+    background:#000; color:#fff;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    display:flex; align-items:center; justify-content:center;
+    padding:48px 22px; min-height:100%;
+    background-image:radial-gradient(900px 500px at 50% -8%, rgba(212,175,55,.14), transparent 60%);
+  }
+  .card{ width:100%; max-width:430px; text-align:center; }
+  .logo{
+    width:112px; height:112px; border-radius:26px; margin:0 auto 22px;
+    display:block; box-shadow:0 18px 50px rgba(212,175,55,.28);
+  }
+  h1{ font-size:30px; line-height:1.15; margin:0 0 8px; letter-spacing:-.02em; font-weight:700; }
+  .sub{ color:#a1a1a6; font-size:16px; margin:0 0 30px; line-height:1.5; }
+  .btn{
+    display:block; width:100%; padding:17px 20px; border:none; border-radius:16px;
+    background:linear-gradient(180deg,#e6c25a,#d4af37); color:#1a1400;
+    font-size:18px; font-weight:700; text-decoration:none; cursor:pointer;
+    box-shadow:0 10px 30px rgba(212,175,55,.32); letter-spacing:-.01em;
+  }
+  .btn:active{ transform:translateY(1px); }
+  .peso{ color:#8a8a8f; font-size:13px; margin:12px 0 0; }
+  .pasos{
+    text-align:left; margin:34px 0 0; padding:22px;
+    background:rgba(255,255,255,.055); border:1px solid rgba(255,255,255,.09);
+    border-radius:18px; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+  }
+  .pasos h2{ font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--oro); margin:0 0 14px; font-weight:700; }
+  .paso{ display:flex; gap:13px; align-items:flex-start; margin:0 0 15px; }
+  .paso:last-child{ margin-bottom:0; }
+  .num{
+    flex:0 0 26px; width:26px; height:26px; border-radius:50%;
+    background:rgba(212,175,55,.16); color:var(--oro); font-weight:700; font-size:14px;
+    display:flex; align-items:center; justify-content:center; margin-top:1px;
+  }
+  .paso p{ margin:0; font-size:15px; line-height:1.5; color:#e6e6ea; }
+  .paso b{ color:#fff; }
+  .nota{ color:#8a8a8f; font-size:13px; line-height:1.55; margin:22px 4px 0; }
+  .nota a{ color:var(--azul); text-decoration:none; }
+  .pie{ color:#6a6a70; font-size:12px; margin:30px 0 0; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <img class="logo" src="/icon-512.png" alt="RF">
+    <h1>RF App para Android</h1>
+    <p class="sub">La app del equipo de Rompiendo&nbsp;Fortalezas: repertorio, servicios, letras y tu mezcla de in-ears.</p>
+
+    <a class="btn" href="RF-App.apk" download>Descargar RF App</a>
+    <p class="peso">Archivo .apk · Android 7 o superior</p>
+
+    <section class="pasos">
+      <h2>Cómo instalar</h2>
+      <div class="paso"><span class="num">1</span><p>Toca <b>Descargar RF App</b>. Cuando termine, abre el archivo.</p></div>
+      <div class="paso"><span class="num">2</span><p>Android te va a preguntar por permiso: toca <b>Ajustes</b> y activa <b>Permitir de esta fuente</b>.</p></div>
+      <div class="paso"><span class="num">3</span><p>Vuelve atrás y toca <b>Instalar</b>. Listo: el ícono dorado queda en tu pantalla.</p></div>
+    </section>
+
+    <p class="nota">¿iPhone? Entra a TestFlight desde <a href="https://testflight.apple.com/join/5BfpG8J7">este enlace</a>.<br>
+    ¿Prefieres no instalar nada? Abre <a href="https://app.rfortalezas.com">app.rfortalezas.com</a> en el navegador.</p>
+
+    <p class="pie">Rompiendo Fortalezas · uso interno del equipo</p>
+  </main>
+</body>
+</html>
