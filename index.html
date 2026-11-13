@@ -1051,6 +1051,7 @@ const DemoDB = (() => {
     async blocks() { return clone(st.blocks || []); },
     async addBlock(b) { st.blocks = st.blocks || []; const row = { id: uid(), member_id: b.member_id, date: b.date, reason: b.reason || '' }; st.blocks.push(row); save(); return row; },
     async removeBlock(id) { st.blocks = (st.blocks || []).filter(b => b.id !== id); save(); },
+    async saveToken() {},
     onChange(f) { subs.add(f); },
   };
 })();
@@ -1114,6 +1115,7 @@ const SupaDB = (cfg) => {
     async blocks() { try { return await q(sb.from('blocks').select('*').order('date')); } catch (e) { return []; } },
     async addBlock(b) { return q(sb.from('blocks').insert({ member_id: b.member_id, date: b.date, reason: b.reason || '' }).select('*').single()); },
     async removeBlock(id) { await q(sb.from('blocks').delete().eq('id', id)); },
+    async saveToken(token, platform) { await q(sb.from('device_tokens').upsert({ token, platform }, { onConflict: 'token' })); },
     onChange(f) { subs.add(f); },
   };
 };
@@ -3111,6 +3113,25 @@ function viewLogin(err) {
   draw();
 }
 
+// Notificaciones nativas (app instalada): pide permiso, consigue el token del teléfono y lo guarda en Supabase.
+// El plugin @capacitor/push-notifications se agrega en la reconstrucción nativa; en web/PWA esto no hace nada.
+async function nativePushRegister() {
+  try {
+    if (!isNativeApp() || DB.mode !== 'live' || !DB.me()) return;
+    const PN = (window.Capacitor && window.Capacitor.Plugins || {}).PushNotifications;
+    if (!PN) return;
+    let perm = await PN.checkPermissions();
+    if (perm.receive !== 'granted') perm = await PN.requestPermissions();
+    if (perm.receive !== 'granted') return;
+    PN.addListener('registration', async (t) => {
+      const platform = (window.Capacitor.getPlatform && window.Capacitor.getPlatform()) || 'ios';
+      try { await DB.saveToken(t.value, platform); } catch (e) {}
+    });
+    PN.addListener('registrationError', () => {});
+    await PN.register();
+  } catch (e) {}
+}
+
 (async function start() {
   try { const t = localStorage.getItem('rf-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
   let cfg = window.RF_CFG && window.RF_CFG.url ? window.RF_CFG : null; try { if (!cfg) cfg = JSON.parse(localStorage.getItem('rf-cfg') || 'null'); } catch (e) {}
@@ -3119,6 +3140,7 @@ function viewLogin(err) {
   DB.onChange(() => reload());
   const h = (location.hash || '').slice(1); if (TABS.some(t => t[0] === h) || h === 'me') ST.tab = h; else if (h === 'mix' || h === 'live') { ST.tab = h; ST.stage = h; }
   await reload(); syncThemeColor(); if (ST.tab === 'mix') mixStart();
+  nativePushRegister();
   try { matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (!document.documentElement.dataset.theme) setTheme(''); }); } catch (e) {}
   if ('serviceWorker' in navigator && location.protocol === 'https:' && window.RF_CFG && !isNativeApp()) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
