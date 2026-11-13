@@ -1048,6 +1048,9 @@ const DemoDB = (() => {
     async updateAssign(id, patch) { st.services.forEach(s => s.team.forEach(t => { if (t.id === id) Object.assign(t, patch); })); save(); },
     async unassign(id) { st.services.forEach(s => { s.team = s.team.filter(t => t.id !== id); }); save(); },
     async setServiceSongs(sid, list) { const s = st.services.find(x => x.id === sid); s.songs = list.map((x, i) => Object.assign({ id: x.id || uid() }, x, { position: i })); save(); },
+    async blocks() { return clone(st.blocks || []); },
+    async addBlock(b) { st.blocks = st.blocks || []; const row = { id: uid(), member_id: b.member_id, date: b.date, reason: b.reason || '' }; st.blocks.push(row); save(); return row; },
+    async removeBlock(id) { st.blocks = (st.blocks || []).filter(b => b.id !== id); save(); },
     onChange(f) { subs.add(f); },
   };
 })();
@@ -1108,6 +1111,9 @@ const SupaDB = (cfg) => {
     async unassign(id) { await q(sb.from('assignments').delete().eq('id', id)); },
     async setServiceSongs(sid, list) { await q(sb.rpc('rf_set_songs', { p_service: sid, p_songs: list.map((x, i) => ({ song_id: x.song_id, position: i, key: x.key || '', lead_id: x.lead_id || null, notes: x.notes || '' })) })); },
     async savePush(sub) { await q(sb.from('push_subs').upsert({ endpoint: sub.endpoint, sub }, { onConflict: 'endpoint' })); },
+    async blocks() { try { return await q(sb.from('blocks').select('*').order('date')); } catch (e) { return []; } },
+    async addBlock(b) { return q(sb.from('blocks').insert({ member_id: b.member_id, date: b.date, reason: b.reason || '' }).select('*').single()); },
+    async removeBlock(id) { await q(sb.from('blocks').delete().eq('id', id)); },
     onChange(f) { subs.add(f); },
   };
 };
@@ -2314,7 +2320,7 @@ const initials = n => String(n || '?').replace(/\(.*?\)/g, '').trim().split(/\s+
 const gcal = (title, start, mins, place, details) => { const f = d => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); const e = new Date(start.getTime() + mins * 6e4); return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${f(start)}/${f(e)}&location=${encodeURIComponent(place || '')}&details=${encodeURIComponent(details || '')}`; };
 
 let DB = DemoDB;
-const ST = { tab: 'home', view: null, members: [], songs: [], services: [], notices: [], songFilter: '', songSeg: 'all', songTagF: [], sheet: { semi: 0, mode: null, big: false }, live: null };
+const ST = { tab: 'home', view: null, members: [], songs: [], services: [], notices: [], blocks: [], songFilter: '', songSeg: 'all', songTagF: [], sheet: { semi: 0, mode: null, big: false }, live: null };
 let toastT;
 function toast(msg, ms = 2600) { let t = $('#toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); document.body.append(t); } t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms); }
 const me = () => DB.me() || {};
@@ -2326,9 +2332,13 @@ const past = () => ST.services.filter(s => pD(s.date) < new Date(new Date().toDa
 const myAssign = s => s.team.filter(t => t.member_id === me().id);
 const canChoose = s => isDir() || myAssign(s).some(t => t.chooses);
 const lastUsed = sid => { const p = past().find(s => s.songs.some(x => x.song_id === sid)); return p ? pD(p.date) : null; };
+// días que alguien no puede servir
+const myBlocks = () => (ST.blocks || []).filter(b => b.member_id === me().id).sort((a, b) => a.date.localeCompare(b.date));
+const blockedOn = (mid, date) => (ST.blocks || []).find(b => b.member_id === mid && b.date === date);
+const blocksForDate = date => (ST.blocks || []).filter(b => b.date === date);
 async function reload() {
   const prev = new Set(ST.notices.map(n => n.id)), first = !ST._nLoaded;
-  [ST.members, ST.songs, ST.services, ST.notices] = await Promise.all([DB.members(), DB.songs(), DB.services(), DB.notices ? DB.notices().catch(() => []) : []]);
+  [ST.members, ST.songs, ST.services, ST.notices, ST.blocks] = await Promise.all([DB.members(), DB.songs(), DB.services(), DB.notices ? DB.notices().catch(() => []) : [], DB.blocks ? DB.blocks().catch(() => []) : []]);
   ST._nLoaded = true; render();
   // llegó algo nuevo mientras la app está abierta: se avisa abajo
   if (!first) { const nw = ST.notices.filter(n => !prev.has(n.id) && n.by_member !== me().id); if (nw.length) toast(nw.length === 1 ? '🔔 ' + nw[0].title : `🔔 ${nw.length} notificaciones nuevas`, 4500); }
@@ -2555,6 +2565,7 @@ function viewService(id) {
     <div class="sechead"><h3>Repertorio</h3><span class="sp"></span>${s.songs.length ? `<button class="btn small" data-listen="${s.id}">${ic('yt')}Escuchar</button>` : ''}${canChoose(s) ? `<button class="btn small primary" data-choose="${s.id}">${ic('music')}${s.songs.length ? 'Editar repertorio' : 'Elegir canciones'}</button>` : ''}</div>
     <section class="card">${choosersProgress(s)}<div class="list setl">${s.songs.length ? s.songs.map((x, i) => rowSetSong(s, x, i, false)).join('') : '<div class="empty">Todavía no hay canciones. Los cantantes las eligen durante la semana.</div>'}</div>${teamStrip(s)}</section>
     <div class="sechead"><h3>Equipo y confirmaciones</h3><span class="sp"></span>${dir ? `<button class="btn small" data-addteam="${s.id}">${ic('plus')}Asignar</button>` : ''}</div>
+    ${dir ? (() => { const bl = blocksForDate(s.date).filter(b => !s.team.some(t => t.member_id === b.member_id)); return bl.length ? `<div class="card" style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px"><span class="pill bad">No disponibles</span><p class="hint" style="margin:0;flex:1">Este día no pueden: ${bl.map(b => { const mm = mem(b.member_id) || {}; return `<b>${esc(firstName(mm.name))}</b>${b.reason ? ' (' + esc(b.reason) + ')' : ''}`; }).join(', ')}.</p></div>` : ''; })() : ''}
     <div class="roles">${s.team.length ? ROLES.filter(r => byRole[r]).concat(Object.keys(byRole).filter(r => !ROLES.includes(r))).map(r => byRole[r].map(roleCard).join('')).join('') : '<div class="empty">Nadie asignado todavía.</div>'}</div>
     ${dir ? `<div class="links"><button class="btn small danger" data-delsvc="${s.id}">${ic('trash')}Eliminar servicio</button></div>` : ''}</div>`;
 }
@@ -2719,7 +2730,8 @@ function profileHtml(m, own) {
     ${st.up.length ? `<div class="sechead"><h3>Próximos servicios</h3></div><div class="card list">${st.up.map(s => { const t = s.team.filter(x => x.member_id === m.id); const d = pD(s.date); const pg = (s.program || []).filter(it => it.who_id === m.id);
       return `<div class="row click" data-open="${s.id}"><div class="cal" style="width:52px;height:56px;border-radius:12px"><small style="font-size:11px">${dMon.format(d).replace('.', '')}</small><b style="font-size:26px">${d.getDate()}</b></div><div class="tx"><b>${esc(t.map(x => x.role).join(' · '))}</b><small>${cap(dLong.format(d))}${pg.length ? ' · programa: ' + pg.map(it => esc(it.title || PTYPES[it.type].l)).join(', ') : ''}</small></div>${t.some(x => x.status === 'pending') ? '<span class="pill warn">Sin confirmar</span>' : t.some(x => x.status === 'no') ? '<span class="pill bad">No puede</span>' : '<span class="pill ok">Confirmado</span>'}</div>`; }).join('')}</div>` : ''}
     ${st.ps.length ? `<div class="sechead"><h3>Historial</h3><span class="sp"></span><span class="hint">${st.ps.length} en total</span></div><div class="card list">${st.ps.slice(0, 8).map(s => { const d = pD(s.date); const t = s.team.filter(x => x.member_id === m.id && x.status !== 'no'); const sg = s.songs.filter(x => x.lead_id === m.id).map(x => (song(x.song_id) || {}).title).filter(Boolean);
-      return `<div class="row click" data-open="${s.id}"><span class="hdate num"><b>${d.getDate()}</b><small>${dMon.format(d).replace('.', '')}</small></span><div class="tx"><b>${esc(t.map(x => x.role).join(' · '))}</b><small>${sg.length ? 'Cantó: ' + esc(sg.join(', ')) : esc(s.name || 'Servicio')}</small></div></div>`; }).join('')}</div>` : ''}`;
+      return `<div class="row click" data-open="${s.id}"><span class="hdate num"><b>${d.getDate()}</b><small>${dMon.format(d).replace('.', '')}</small></span><div class="tx"><b>${esc(t.map(x => x.role).join(' · '))}</b><small>${sg.length ? 'Cantó: ' + esc(sg.join(', ')) : esc(s.name || 'Servicio')}</small></div></div>`; }).join('')}</div>` : ''}
+    ${(() => { if (own) return ''; const bl = (ST.blocks || []).filter(b => b.member_id === m.id && b.date >= isoD(new Date())).sort((a, b) => a.date.localeCompare(b.date)); return bl.length ? `<div class="sechead"><h3>Días que no puede servir</h3></div><div class="card list">${bl.map(b => { const d = pD(b.date); return `<div class="row"><span class="hdate num"><b>${d.getDate()}</b><small>${dMon.format(d).replace('.', '')}</small></span><div class="tx"><b>${cap(dLong.format(d))}</b><small>${b.reason ? esc(b.reason) : 'No disponible'}</small></div></div>`; }).join('')}</div>` : ''; })()}`;
 }
 function viewProfile(id) {
   const m = mem(id); if (!m) return '<div class="wrap"><div class="empty">Esta persona ya no está en el equipo.</div></div>';
@@ -2740,6 +2752,11 @@ function viewMe() {
       <div class="links"><input class="in" id="pPw" type="password" autocomplete="new-password" placeholder="Nueva contraseña" style="flex:1;min-width:180px"><button class="btn primary" data-act="setpw">Guardar contraseña</button></div></section>`}
     <section class="card"><div class="sechead"><h3>Recordatorios</h3></div><p class="hint" style="margin:8px 0 12px">Te avisamos los lunes si te toca elegir canciones, y un día antes de cada ensayo.</p>
       <div class="links"><button class="btn" data-act="push">${ic('bell')}Activar notificaciones en este teléfono</button></div><p class="hint">En iPhone primero agrega la app a la pantalla de inicio (Compartir → Agregar a inicio).</p></section>
+    <section class="card"><div class="sechead"><h3>Días que no puedo servir</h3></div>
+      <p class="hint" style="margin:8px 0 12px">Marca los días que no vas a estar disponible. El director los ve cuando arma el equipo, así no te asigna ese día.</p>
+      <div class="fgrid"><div class="field"><label for="blkDate">Día</label><input class="in" id="blkDate" type="date" min="${isoD(new Date())}"></div><div class="field"><label for="blkReason">Motivo (opcional)</label><input class="in" id="blkReason" placeholder="Viaje, trabajo, examen…"></div></div>
+      <div class="links" style="margin-top:10px"><button class="btn primary" data-act="addblock">${ic('plus')}Agregar día</button></div>
+      ${(() => { const bl = myBlocks().filter(b => b.date >= isoD(new Date())); return bl.length ? `<div class="list" style="margin-top:14px">${bl.map(b => { const d = pD(b.date); return `<div class="row"><div class="cal" style="width:48px;height:52px;border-radius:11px"><small style="font-size:10px">${dMon.format(d).replace('.', '')}</small><b style="font-size:22px">${d.getDate()}</b></div><div class="tx"><b>${cap(dLong.format(d))}</b><small>${b.reason ? esc(b.reason) : 'No disponible'}</small></div><button class="ib" data-rmblock="${b.id}" aria-label="Quitar">${ic('x')}</button></div>`; }).join('')}</div>` : '<p class="hint" style="margin-top:4px">No tienes días bloqueados.</p>'; })()}</section>
     <section class="card"><div class="sechead"><h3>Apariencia</h3></div><p class="hint" style="margin:6px 0 10px">De día se lee mejor la clara; en el templo con poca luz, la oscura. «Automática» sigue al teléfono.</p><div class="seg"><button data-theme-set="" class="${th === '' ? 'on' : ''}">${ic('gear')} Automática</button><button data-theme-set="dark" class="${th === 'dark' ? 'on' : ''}">${ic('moon')} Oscura</button><button data-theme-set="light" class="${th === 'light' ? 'on' : ''}">${ic('sun')} Clara</button></div></section>
     ${DB.mode === 'demo' ? `<section class="card"><div class="sechead"><h3>Base de datos</h3></div><p class="hint" style="margin:8px 0 12px">Ahora estás en modo demostración. Cuando la iglesia tenga su base de datos, el director pone aquí la dirección y la clave pública, y todo el equipo comparte la misma información.</p>
       <div class="fgrid"><div class="field"><label for="cfgUrl">Dirección del proyecto</label><input class="in" id="cfgUrl" placeholder="https://xxxx.supabase.co"></div><div class="field"><label for="cfgKey">Clave pública (publishable)</label><input class="in" id="cfgKey" placeholder="sb_publishable_…"></div></div>
@@ -2963,10 +2980,10 @@ function addTeam(sid) {
       $$('#tRoles .pill', w).forEach(b => b.classList.toggle('gold', b.dataset.r === role)); $('#tCh', w).checked = VOICE(role) && role !== 'Coros';
       const busy = new Set(s.team.filter(t => t.role === role).map(t => t.member_id));
       const fits = ST.members.filter(m => (m.roles || []).includes(role)), rest = ST.members.filter(m => !(m.roles || []).includes(role));
-      const row = m => { const other = upcoming().filter(x => x.id !== sid && x.date === s.date && x.team.some(t => t.member_id === m.id)).length; const recent = past().slice(0, 2).filter(x => x.team.some(t => t.member_id === m.id)).length;
-        return `<div class="row click" data-m="${m.id}">${avt(m, '', '')}<div class="tx"><b>${esc(m.name)}</b><small>${esc((m.roles || []).join(' · '))}${recent ? ` · estuvo ${recent === 2 ? 'los dos últimos domingos' : 'el domingo pasado'}` : ''}</small></div>${busy.has(m.id) ? '<span class="pill ok">Ya está</span>' : other ? '<span class="pill warn">Ocupado</span>' : ''}</div>`; };
+      const row = m => { const other = upcoming().filter(x => x.id !== sid && x.date === s.date && x.team.some(t => t.member_id === m.id)).length; const recent = past().slice(0, 2).filter(x => x.team.some(t => t.member_id === m.id)).length; const blk = blockedOn(m.id, s.date);
+        return `<div class="row click${blk ? ' blocked' : ''}" data-m="${m.id}">${avt(m, '', '')}<div class="tx"><b>${esc(m.name)}</b><small>${esc((m.roles || []).join(' · '))}${blk ? ` · <span style="color:var(--bad)">no disponible${blk.reason ? ': ' + esc(blk.reason) : ''}</span>` : recent ? ` · estuvo ${recent === 2 ? 'los dos últimos domingos' : 'el domingo pasado'}` : ''}</small></div>${busy.has(m.id) ? '<span class="pill ok">Ya está</span>' : blk ? '<span class="pill bad">No disponible</span>' : other ? '<span class="pill warn">Ocupado</span>' : ''}</div>`; };
       $('#tList', w).innerHTML = (fits.length ? `<div class="eyebrow" style="margin:6px 0">Tocan o cantan ${esc(role.toLowerCase())}</div>` + fits.map(row).join('') : '') + (rest.length ? `<div class="eyebrow" style="margin:12px 0 6px">Otros</div>` + rest.map(row).join('') : '');
-      $$('[data-m]', w).forEach(r => r.onclick = async () => { if (busy.has(r.dataset.m)) return; await DB.assign({ service_id: sid, member_id: r.dataset.m, role, chooses: $('#tCh', w).checked }); toast('Asignado. Le llega el aviso para confirmar.'); close(); await reload(); });
+      $$('[data-m]', w).forEach(r => r.onclick = async () => { if (busy.has(r.dataset.m)) return; const blk = blockedOn(r.dataset.m, s.date); if (blk && !r.dataset.ok) { r.dataset.ok = 1; const mm = mem(r.dataset.m) || {}; toast(`${firstName(mm.name)} marcó que no puede ese día${blk.reason ? ' (' + blk.reason + ')' : ''}. Toca otra vez para asignarlo igual.`, 4500); return; } await DB.assign({ service_id: sid, member_id: r.dataset.m, role, chooses: $('#tCh', w).checked }); toast('Asignado. Le llega el aviso para confirmar.'); close(); await reload(); });
     };
     $$('#tRoles .pill', w).forEach(b => b.onclick = () => { role = b.dataset.r; draw(); }); draw();
   });
@@ -3010,6 +3027,7 @@ function bind(m) {
   on('[data-member]', e => editMember(e.dataset.member));
   on('[data-prof]', e => { ST.view = { type: 'member', id: e.dataset.prof }; render(); window.scrollTo(0, 0); });
   on('[data-prog]', e => editProgram(e.dataset.prog));
+  on('[data-rmblock]', async e => { try { await DB.removeBlock(e.dataset.rmblock); toast('Día quitado.'); await reload(); } catch (x) { toast('No se pudo quitar: ' + x.message, 4000); } });
   on('[data-viewphoto]', e => viewPhoto(e.dataset.viewphoto));
   $$('[data-photo]', m).forEach(inp => inp.onchange = async () => { const f = inp.files && inp.files[0]; if (!f) return; try { const photo = await photoData(f); const who = Object.assign({}, mem(inp.dataset.photo)); who.photo = photo; await DB.saveMember(who); toast('Foto actualizada.'); await reload(); } catch (x) { toast(x.message, 4000); } });
   on('[data-nophoto]', async e => { const who = Object.assign({}, mem(e.dataset.nophoto), { photo: '' }); await DB.saveMember(who); await reload(); });
@@ -3041,6 +3059,7 @@ function bind(m) {
     if (a === 'remind') toast(DB.mode === 'demo' ? 'En la versión real, ahora le llega el aviso por correo y notificación a quien falte por confirmar o elegir.' : 'Recordatorio enviado al equipo.', 4200);
     if (a === 'saveme') { const mm = Object.assign({}, me(), { name: $('#pName').value.trim(), phone: $('#pPhone').value.trim(), roles: $$('#pRoles .pill.gold').map(b => b.dataset.role) }); await DB.saveMember(mm); toast('Perfil guardado.'); await reload(); }
     if (a === 'setpw') { const v = $('#pPw').value; if (v.length < 8) { toast('Usa al menos 8 caracteres.'); return; } try { await DB.setPassword(v); $('#pPw').value = ''; try { localStorage.setItem('rf-login', 'pw'); } catch (_) {} toast('Contraseña guardada. La próxima vez entras con ella.'); } catch (x) { toast(x.message, 5000); } }
+    if (a === 'addblock') { const di = $('#blkDate'), d = di && di.value; if (!d) { toast('Elige el día que no puedes.'); return; } if (d < isoD(new Date())) { toast('Ese día ya pasó.'); return; } if (myBlocks().some(b => b.date === d)) { toast('Ya habías marcado ese día.'); return; } const reason = ($('#blkReason') ? $('#blkReason').value : '').trim(); try { await DB.addBlock({ member_id: me().id, date: d, reason }); toast('Listo. El director ya lo ve.'); await reload(); } catch (x) { toast('No se pudo guardar: ' + x.message, 4000); } }
     if (a === 'push') enablePush();
     if (a === 'install' && installEvt) { installEvt.prompt(); const r = await installEvt.userChoice; installEvt = null; if (r.outcome !== 'accepted') render(); }
     if (a === 'reset') { DB.reset(); await reload(); toast('Volvieron los datos de ejemplo.'); }
