@@ -1068,8 +1068,9 @@ const SupaDB = (cfg) => {
       if (!window.supabase) throw new Error('No cargó la librería de la base de datos. Revisa la conexión a internet.');
       sb = window.supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true } });
       const { data } = await sb.auth.getSession(); if (/access_token|error_description/.test(location.hash)) try { history.replaceState(null, '', location.pathname); } catch (e) {} if (!data.session) return false;
-      meRow = (await q(sb.rpc('rf_me')))?.[0] || null;
-      sb.channel('rf').on('postgres_changes', { event: '*', schema: 'public' }, ping).subscribe();
+      try { meRow = (await q(sb.rpc('rf_me')))?.[0] || null; }
+      catch (e) { try { const c = JSON.parse(localStorage.getItem('rf-offline') || 'null'); meRow = (c && c.me) || null; } catch (_) { meRow = null; } } // sin internet: perfil guardado
+      try { sb.channel('rf').on('postgres_changes', { event: '*', schema: 'public' }, ping).subscribe(); } catch (e) {}
       return true;
     },
     async sendCode(email) { await q(sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } })); },
@@ -2338,12 +2339,25 @@ const lastUsed = sid => { const p = past().find(s => s.songs.some(x => x.song_id
 const myBlocks = () => (ST.blocks || []).filter(b => b.member_id === me().id).sort((a, b) => a.date.localeCompare(b.date));
 const blockedOn = (mid, date) => (ST.blocks || []).find(b => b.member_id === mid && b.date === date);
 const blocksForDate = date => (ST.blocks || []).filter(b => b.date === date);
+// ---------- modo sin conexión: guarda todo en el teléfono y lo muestra sin internet ----------
+const OFF_KEY = 'rf-offline';
+function offlineSave() { try { localStorage.setItem(OFF_KEY, JSON.stringify({ me: me(), members: ST.members, songs: ST.songs, services: ST.services, blocks: ST.blocks, notices: ST.notices, at: Date.now() })); } catch (e) {} }
+function offlineLoad() { try { const c = JSON.parse(localStorage.getItem(OFF_KEY) || 'null'); if (!c || !c.songs) return false; ST.members = c.members || []; ST.songs = c.songs || []; ST.services = c.services || []; ST.blocks = c.blocks || []; ST.notices = c.notices || []; return true; } catch (e) { return false; } }
+function offlineBar() { return `<div style="margin:0 0 12px;padding:10px 14px;border-radius:12px;background:rgba(212,175,55,.12);border:1px solid rgba(212,175,55,.32);color:var(--gold,#d4af37);font-size:13px;line-height:1.45;display:flex;gap:8px;align-items:center">${ic('wifi')}<span><b>Sin conexión.</b> Ves el repertorio guardado en el teléfono; la mezcla y el «En vivo» funcionan por el WiFi de la consola.</span></div>`; }
 async function reload() {
   const prev = new Set(ST.notices.map(n => n.id)), first = !ST._nLoaded;
-  [ST.members, ST.songs, ST.services, ST.notices, ST.blocks] = await Promise.all([DB.members(), DB.songs(), DB.services(), DB.notices ? DB.notices().catch(() => []) : [], DB.blocks ? DB.blocks().catch(() => []) : []]);
+  try {
+    [ST.members, ST.songs, ST.services, ST.notices, ST.blocks] = await Promise.all([DB.members(), DB.songs(), DB.services(), DB.notices ? DB.notices().catch(() => []) : [], DB.blocks ? DB.blocks().catch(() => []) : []]);
+    ST.offline = false;
+    if (DB.mode === 'live') offlineSave();
+  } catch (e) {
+    // sin internet: usa lo guardado en el teléfono (si hay)
+    if (DB.mode === 'live' && offlineLoad()) ST.offline = true;
+    else { ST._nLoaded = true; throw e; }
+  }
   ST._nLoaded = true; render();
   // llegó algo nuevo mientras la app está abierta: se avisa abajo
-  if (!first) { const nw = ST.notices.filter(n => !prev.has(n.id) && n.by_member !== me().id); if (nw.length) toast(nw.length === 1 ? '🔔 ' + nw[0].title : `🔔 ${nw.length} notificaciones nuevas`, 4500); }
+  if (!first && !ST.offline) { const nw = ST.notices.filter(n => !prev.has(n.id) && n.by_member !== me().id); if (nw.length) toast(nw.length === 1 ? '🔔 ' + nw[0].title : `🔔 ${nw.length} notificaciones nuevas`, 4500); }
 }
 /* ---------- la campanita ---------- */
 const N_IC = { aviso: 'mega', asignacion: 'cal', repertorio: 'music', programa: 'note', respuesta: 'team' };
@@ -2428,7 +2442,7 @@ function render() {
   else if (v && v.type === 'song') html = viewSong(v.id);
   else if (v && v.type === 'member') html = viewProfile(v.id);
   else html = ({ home: viewHome, services: viewServices, songs: viewSongs, team: viewTeam, live: viewLive, mix: viewMix, me: viewMe })[ST.tab]();
-  m.innerHTML = mhead() + html;
+  m.innerHTML = mhead() + (ST.offline ? offlineBar() : '') + html;
   if (split && v) $$(`.spl [data-song="${v.id}"], .spl [data-open="${v.id}"]`, m).forEach(e => e.classList.add('sel'));
   $$('[data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
   $$('[data-themetg]').forEach(b => b.onclick = () => setTheme(effTheme() === 'dark' ? 'light' : 'dark'));
